@@ -15,6 +15,8 @@
 #include <cuckoocache.h>
 #include <boost/thread.hpp>
 
+#include <script_expr/RuleProc.h>
+
 namespace {
 /**
  * Valid signature cache, to avoid doing expensive ECDSA signature checking
@@ -108,3 +110,27 @@ int ServerTransactionSignatureChecker::CheckEvalCondition(const CC *cond) const
     return RunCCEval(cond, *txTo, nIn);
 }
 
+// run script extension rule evaluator
+int ServerTransactionSignatureChecker::CheckTxRules(const std::vector<unsigned char>& data) const
+{
+    CRuleProc ruleproc;
+    ruleproc.init();
+    std::string expr(data.begin(), data.end());
+    std::string error;
+
+    /*int r;
+    if ((r = ruleproc.compile(expr, error)) != RULE_OKAY)
+        return r;*/
+
+    return ruleproc.eval(expr, *txTo, error);  // compile and execute
+}
+
+// only compile rule (to just check syntax while signature is produced)
+int SkipRuleTransactionSignatureChecker::CheckTxRules(const std::vector<unsigned char>& data) const
+{
+    CRuleProc ruleproc;
+    std::string error;
+    ruleproc.init();
+    std::string expr(data.begin(), data.end());
+    return ruleproc.compile(expr, error);  // compile only
+}

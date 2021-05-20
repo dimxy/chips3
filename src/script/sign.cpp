@@ -11,6 +11,8 @@
 #include <script/standard.h>
 #include <uint256.h>
 
+#include <utilstrencodings.h>
+#include <iostream>
 
 typedef std::vector<unsigned char> valtype;
 
@@ -19,16 +21,18 @@ TransactionSignatureCreator::TransactionSignatureCreator(const SigningProvider* 
 bool TransactionSignatureCreator::CreateSig(std::vector<unsigned char>& vchSig, const CKeyID& address, const CScript& scriptCode, SigVersion sigversion) const
 {
     CKey key;
-    if (!m_provider->GetKey(address, key))
+    if (!m_provider->GetKey(address, key)) {
         return false;
+    }
 
     // Signing with uncompressed keys is disabled in witness scripts
     if (sigversion == SigVersion::WITNESS_V0 && !key.IsCompressed())
         return false;
 
     uint256 hash = SignatureHash(scriptCode, *txTo, nIn, nHashType, amount, sigversion);
-    if (!key.Sign(hash, vchSig))
+    if (!key.Sign(hash, vchSig))  {
         return false;
+    }
     vchSig.push_back((unsigned char)nHashType);
     return true;
 }
@@ -84,6 +88,7 @@ static bool SignStep(const BaseSignatureCreator& creator, const CScript& scriptP
         keyID = CPubKey(vSolutions[0]).GetID();
         return Sign1(keyID, creator, scriptPubKey, ret, sigversion);
     case TX_PUBKEYHASH:
+    case TX_PUBKEYHASH_WITH_TXRULE:
         keyID = CKeyID(uint160(vSolutions[0]));
         if (!Sign1(keyID, creator, scriptPubKey, ret, sigversion))
             return false;
@@ -400,6 +405,11 @@ public:
     bool CheckSig(const std::vector<unsigned char>& scriptSig, const std::vector<unsigned char>& vchPubKey, const CScript& scriptCode, SigVersion sigversion) const override
     {
         return true;
+    }
+    // TODO: this is needed to allow to test scripts with txrule. Not clear why other script work without this, like CLTV...
+    int CheckTxRules(const std::vector<unsigned char>& data) const override      
+    {
+        return 1;
     }
 };
 const DummySignatureChecker dummyChecker;

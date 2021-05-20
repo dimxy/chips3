@@ -31,6 +31,8 @@
 #include <utilmoneystr.h>
 #include <wallet/fees.h>
 
+#include <script/serverchecker.h>
+
 #include <assert.h>
 #include <future>
 
@@ -2582,7 +2584,9 @@ bool CWallet::SignTransaction(CMutableTransaction &tx)
         const CScript& scriptPubKey = mi->second.tx->vout[input.prevout.n].scriptPubKey;
         const CAmount& amount = mi->second.tx->vout[input.prevout.n].nValue;
         SignatureData sigdata;
-        if (!ProduceSignature(TransactionSignatureCreator(this, &txNewConst, nIn, amount, SIGHASH_ALL), scriptPubKey, sigdata)) {
+
+        // use signatore creator that skips rule eval:
+        if (!ProduceSignature(SkipRuleTransactionSignatureCreator(this, &txNewConst, nIn, amount, SIGHASH_ALL), scriptPubKey, sigdata)) {
             return false;
         }
         UpdateTransaction(tx, nIn, sigdata);
@@ -2614,7 +2618,7 @@ bool CWallet::FundTransaction(CMutableTransaction& tx, CAmount& nFeeRet, int& nC
 
     CReserveKey reservekey(this);
     CTransactionRef tx_new;
-    if (!CreateTransaction(vecSend, tx_new, reservekey, nFeeRet, nChangePosInOut, strFailReason, coinControl, false)) {
+    if (!CreateTransaction(vecSend, tx_new, reservekey, nFeeRet, nChangePosInOut, strFailReason, coinControl, uint256(), 0, CScript(), false)) {
         return false;
     }
 
@@ -2677,7 +2681,7 @@ extern std::string NOTARY_PUBKEY;
 extern uint8_t NOTARY_PUBKEY33[33];
 
 bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CTransactionRef& tx, CReserveKey& reservekey, CAmount& nFeeRet,
-                                int& nChangePosInOut, std::string& strFailReason, const CCoinControl& coin_control, bool sign)
+                                int& nChangePosInOut, std::string& strFailReason, const CCoinControl& coin_control, uint256 txid, int32_t vout, CScript opreturn, bool sign)
 {
     CAmount nValue = 0;
     int nChangePosRequest = nChangePosInOut;
@@ -2845,23 +2849,41 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CTransac
 
                 // Choose coins to use
                 bool bnb_used;
-                if (pick_new_inputs) {
-                    nValueIn = 0;
-                    setCoins.clear();
-                    coin_selection_params.change_spend_size = CalculateMaximumSignedInputSize(change_prototype_txout, this);
-                    coin_selection_params.effective_fee = nFeeRateNeeded;
-                    if (!SelectCoins(vAvailableCoins, nValueToSelect, setCoins, nValueIn, coin_control, coin_selection_params, bnb_used))
-                    {
-                        // If BnB was used, it was the first pass. No longer the first pass and continue loop with knapsack.
-                        if (bnb_used) {
-                            coin_selection_params.use_bnb = false;
-                            continue;
-                        }
-                        else {
-                            strFailReason = _("Insufficient funds");
-                            return false;
+                if (txid.IsNull())
+                {
+                    if (pick_new_inputs) {
+                        nValueIn = 0;
+                        setCoins.clear();
+                        coin_selection_params.change_spend_size = CalculateMaximumSignedInputSize(change_prototype_txout, this);
+                        coin_selection_params.effective_fee = nFeeRateNeeded;
+                        if (!SelectCoins(vAvailableCoins, nValueToSelect, setCoins, nValueIn, coin_control, coin_selection_params, bnb_used))
+                        {
+                            // If BnB was used, it was the first pass. No longer the first pass and continue loop with knapsack.
+                            if (bnb_used) {
+                                coin_selection_params.use_bnb = false;
+                                continue;
+                            }
+                            else {
+                                strFailReason = _("Insufficient funds");
+                                return false;
+                            }
                         }
                     }
+                }
+                else
+                {
+                    // for testing - pick specific utxo as input:
+                    setCoins.clear();
+                    nValueIn = 0;
+                    uint256 hashBlock;
+                    CTransactionRef vintx;
+                    if (!GetTransaction(txid, vintx, Params().GetConsensus(),  hashBlock)) {
+                        strFailReason = _("Could not load the input tx from params");
+                        return false;
+                    }
+                    CInputCoin ic(vintx, vout);
+                    nValueIn += ic.effective_value;
+                    setCoins.insert(ic);
                 }
 
                 const CAmount nChange = nValueIn - nValueToSelect;
@@ -2898,6 +2920,10 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CTransac
                     nChangePosInOut = -1;
                 }
 
+                // add optional opreturn (test code):
+                if (opreturn.IsUnspendable())
+                    txNew.vout.push_back(CTxOut(0, opreturn));
+
                 // Dummy fill vin for maximum size estimation
                 //
                 for (const auto& coin : setCoins) {
@@ -2906,6 +2932,7 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CTransac
 
                 nBytes = CalculateMaximumSignedTxSize(txNew, this);
                 if (nBytes < 0) {
+                    std::cerr << __func__ << " CalculateMaximumSignedTxSize failed" << std::endl;
                     strFailReason = _("Signing transaction failed");
                     return false;
                 }
@@ -3019,9 +3046,11 @@ bool CWallet::CreateTransaction(const std::vector<CRecipient>& vecSend, CTransac
                 const CScript& scriptPubKey = coin.txout.scriptPubKey;
                 SignatureData sigdata;
 
-                if (!ProduceSignature(TransactionSignatureCreator(this, &txNewConst, nIn, coin.txout.nValue, SIGHASH_ALL), scriptPubKey, sigdata))
+                // use signatore creator that skips rule eval:
+                if (!ProduceSignature(SkipRuleTransactionSignatureCreator(this, &txNewConst, nIn, coin.txout.nValue, SIGHASH_ALL), scriptPubKey, sigdata))
                 {
                     strFailReason = _("Signing transaction failed");
+                    std::cerr << __func__ << " ProduceSignature failed" << std::endl;
                     return false;
                 } else {
                     UpdateTransaction(txNew, nIn, sigdata);

@@ -68,7 +68,11 @@ typedef enum ScriptError_t
 
     /* crypto-condition script errors */
     SCRIPT_ERR_CRYPTOCONDITION_VERIFY,
-    SCRIPT_ERR_CRYPTOCONDITION_INVALID_FULFILLMENT
+    SCRIPT_ERR_CRYPTOCONDITION_INVALID_FULFILLMENT,
+
+    /* tx rules errors */
+    SCRIPT_ERR_INVALID_TXRULES,
+    SCRIPT_ERR_TXRULES_VERIFY,
 
 } ScriptError;
 

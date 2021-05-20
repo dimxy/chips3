@@ -7,6 +7,7 @@
 #define BITCOIN_SCRIPT_SIGCACHE_H
 
 #include <script/interpreter.h>
+#include <script/sign.h>
 
 #include <vector>
 
@@ -50,6 +51,29 @@ public:
 
     bool VerifySignature(const std::vector<unsigned char>& vchSig, const CPubKey& vchPubKey, const uint256& sighash) const override;
     int CheckEvalCondition(const CC *cond) const;
+    int CheckTxRules(const std::vector<unsigned char>& data) const override;
+};
+
+// we need this only to move lib references from standard.cpp
+class SkipRuleTransactionSignatureChecker : public TransactionSignatureChecker
+{
+public:
+    SkipRuleTransactionSignatureChecker(const CTransaction* txToIn, unsigned int nInIn, const CAmount& amountIn) : 
+        TransactionSignatureChecker(txToIn, nInIn, amountIn) {}
+    int CheckTxRules(const std::vector<unsigned char>& data) const override;
+};
+
+class SkipRuleTransactionSignatureCreator : public TransactionSignatureCreator {
+    const SkipRuleTransactionSignatureChecker checker;
+
+public:
+    SkipRuleTransactionSignatureCreator(const SigningProvider* provider, const CTransaction* txToIn, unsigned int nInIn, const CAmount& amountIn, int nHashTypeIn=SIGHASH_ALL) :
+        TransactionSignatureCreator(provider, txToIn, nInIn, amountIn, nHashTypeIn), 
+        checker(txToIn, nInIn, amountIn) 
+        {
+        }
+
+    const BaseSignatureChecker& Checker() const override { return checker; }
 };
 
 void InitSignatureCache();

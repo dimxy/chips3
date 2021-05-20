@@ -1053,6 +1053,40 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                             return set_error(serror, SCRIPT_ERR_CRYPTOCONDITION_VERIFY);
                     }
                 }
+
+                case OP_EVALTXRULES:
+                case OP_EVALTXRULESVERIFY:
+                {
+                    if (!(flags & SCRIPT_VERIFY_TXRULES)) {
+                        // not enabled; treat as a NOP...?
+                        break;
+                    }
+                    //if (!IsTxRulesEnabled()) {
+                    //    goto INTERPRETER_DEFAULT; // TODO: check this?
+                    //}
+
+                    if (stack.size() < 1)
+                        return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+
+                    int fResult = checker.CheckTxRules(stacktop(-1));
+
+                    if (fResult < 0) {
+                        return set_error(serror, SCRIPT_ERR_INVALID_TXRULES);
+                    }
+
+                    popstack(stack);
+
+                    stack.push_back(fResult > 0 ? vchTrue : vchFalse);
+
+                    if (opcode == OP_EVALTXRULESVERIFY)
+                    {
+                        if (fResult > 0)
+                            popstack(stack);
+                        else
+                            return set_error(serror, SCRIPT_ERR_TXRULES_VERIFY);
+                    }
+                }
+
                 break;
 
 INTERPRETER_DEFAULT:

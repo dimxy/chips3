@@ -57,6 +57,7 @@ enum txnouttype
     TX_WITNESS_V0_SCRIPTHASH,
     TX_WITNESS_V0_KEYHASH,
     TX_WITNESS_UNKNOWN, //!< Only for Witness versions not already defined above
+    TX_PUBKEYHASH_WITH_TXRULE,
 };
 
 class CNoDestination {
@@ -160,6 +161,11 @@ bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::
  * script for CNoDestination.
  */
 CScript GetScriptForDestination(const CTxDestination& dest);
+
+/**
+ * Generate a Bitcoin scriptPubKey for the given address simlar to P2PKH but extended with a rule expression as script extension.
+ */
+CScript GetScriptForDestinationAndRule(const CKeyID &keyID, const std::string &rule);
 
 /** Generate a P2PK script for the given pubkey. */
 CScript GetScriptForRawPubKey(const CPubKey& pubkey);
