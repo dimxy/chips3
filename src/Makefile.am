@@ -33,7 +33,9 @@ LIBBITCOIN_CRYPTO=crypto/libbitcoin_crypto.a
 LIBBITCOINQT=qt/libbitcoinqt.a
 LIBSECP256K1=secp256k1/libsecp256k1.la
 LIBCRYPTOCONDITIONS=cryptoconditions/libcryptoconditions_core.la
-
+LIBCPARSE = script_expr/cparse/builtin-features.o \
+            script_expr/cparse/core-shunting-yard.o
+            
 if ENABLE_ZMQ
 LIBBITCOIN_ZMQ=libbitcoin_zmq.a
 endif
@@ -49,6 +51,9 @@ $(LIBSECP256K1): $(wildcard secp256k1/src/*) $(wildcard secp256k1/include/*)
 
 $(LIBCRYPTOCONDITIONS): $(wildcard cryptoconditions/src/*) $(wildcard cryptoconditions/include/*)
 	$(AM_V_at)$(MAKE) $(AM_MAKEFLAGS) -C $(@D) $(@F)
+
+$(LIBCPARSE): $(wildcard script_expr/cparse/*.cpp) $(wildcard script_expr/cparse/*.h) $(wildcard script_expr/cparse/*.hpp) $(wildcard script_expr/cparse/*.inc) $(wildcard script_expr/cparse/builtin-features/*.inc)
+	$(AM_V_at) CC="$(CC)" CXX="$(CXX)" $(MAKE) -C $(@D) 
 
 # Make is not made aware of per-object dependencies to avoid limiting building parallelization
 # But to build the less dependent modules first, we manually select their order here:
@@ -237,6 +242,7 @@ libbitcoin_server_a_SOURCES = \
   validation.cpp \
   validationinterface.cpp \
   versionbits.cpp \
+  script_expr/RuleProc.cpp \
   $(BITCOIN_CORE_H)
 
 if ENABLE_ZMQ
@@ -416,7 +422,9 @@ chipsd_LDADD = \
   $(LIBLEVELDB_SSE42) \
   $(LIBMEMENV) \
   $(LIBSECP256K1) \
-  $(LIBCRYPTOCONDITIONS)
+  $(LIBCRYPTOCONDITIONS) \
+  $(LIBCPARSE)
+
 
 chipsd_LDADD += $(BOOST_LIBS) $(BDB_LIBS) $(SSL_LIBS) $(CRYPTO_LIBS) $(MINIUPNPC_LIBS) $(EVENT_PTHREADS_LIBS) $(EVENT_LIBS) $(ZMQ_LIBS)
 
