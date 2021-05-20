@@ -13,6 +13,8 @@
 #include <vector>
 #include <stdint.h>
 #include <string>
+#include <iostream>
+
 
 class CPubKey;
 class CScript;
@@ -112,6 +114,10 @@ enum
     // Public keys in segregated witness scripts must be compressed
     //
     SCRIPT_VERIFY_WITNESS_PUBKEYTYPE = (1U << 15),
+
+    // verify script extensions:rule expressions allowing access to tx and chain data 
+    // 
+    SCRIPT_VERIFY_TXRULES = (1U << 16),
 };
 
 bool CheckSignatureEncoding(const std::vector<unsigned char> &vchSig, unsigned int flags, ScriptError* serror);
@@ -155,6 +161,12 @@ public:
         const std::vector<unsigned char>& ffillBin,
         const CScript& scriptCode) const
     {
+        return false;
+    }
+
+    virtual int CheckTxRules(const std::vector<unsigned char>& data) const 
+    {
+        std::cerr << __func__ << " internal script error: base function called always false" << std::endl;
         return false;
     }
 

@@ -132,6 +132,9 @@ const char* GetOpName(opcodetype opcode)
     case OP_CHECKCRYPTOCONDITIONVERIFY:
                                      return "OP_CHECKCRYPTOCONDITIONVERIFY";
 
+    case OP_EVALTXRULES   :          return "OP_EVALTXRULES";
+    case OP_EVALTXRULESVERIFY:       return "OP_EVALTXRULESVERIFY";
+
     // expansion
     case OP_NOP1                   : return "OP_NOP1";
     case OP_CHECKLOCKTIMEVERIFY    : return "OP_CHECKLOCKTIMEVERIFY";

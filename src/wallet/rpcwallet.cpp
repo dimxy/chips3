@@ -37,6 +37,8 @@
 
 #include <univalue.h>
 
+#include "script_expr/RuleProc.h"
+
 static const std::string WALLET_ENDPOINT_BASE = "/wallet/";
 int32_t komodo_dpowconfs(int32_t height,int32_t numconfs);
 
@@ -418,7 +420,7 @@ UniValue getaddressesbyaccount(const JSONRPCRequest& request)
     return ret;
 }
 
-static CTransactionRef SendMoney(CWallet * const pwallet, const CTxDestination &address, CAmount nValue, bool fSubtractFeeFromAmount, const CCoinControl& coin_control, mapValue_t mapValue, std::string fromAccount)
+static CTransactionRef SendMoney(CWallet * const pwallet, const CTxDestination &address, CAmount nValue, bool fSubtractFeeFromAmount, const CCoinControl& coin_control, mapValue_t mapValue, std::string fromAccount, const std::string &rule, uint256 txid, int32_t vout, CScript opreturn)
 {
     CAmount curBalance = pwallet->GetBalance();
 
@@ -434,10 +436,24 @@ static CTransactionRef SendMoney(CWallet * const pwallet, const CTxDestination &
     }
 
     // Parse Bitcoin address
-    CScript scriptPubKey = GetScriptForDestination(address);
+    CScript scriptPubKey;
+    if (rule.empty())
+        scriptPubKey = GetScriptForDestination(address);
+    else
+    {
+        CRuleProc ruleproc;
+        std::string error;
+        ruleproc.init();
+        if (ruleproc.compile(rule, error) != RULE_OKAY)  {
+            throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Could not parse rule expression: ") + error);
+        }
+        std::cerr << __func__ << " address.type().name()=" << address.type().name() << " address.which()=" << address.which() << std::endl;
+        scriptPubKey = GetScriptForDestinationAndRule(boost::get<CKeyID>(address), rule);
+    }
 
     // Create and send the transaction
     CReserveKey reservekey(pwallet);
+
     CAmount nFeeRequired;
     std::string strError;
     std::vector<CRecipient> vecSend;
@@ -445,7 +461,7 @@ static CTransactionRef SendMoney(CWallet * const pwallet, const CTxDestination &
     CRecipient recipient = {scriptPubKey, nValue, fSubtractFeeFromAmount};
     vecSend.push_back(recipient);
     CTransactionRef tx;
-    if (!pwallet->CreateTransaction(vecSend, tx, reservekey, nFeeRequired, nChangePosRet, strError, coin_control)) {
+    if (!pwallet->CreateTransaction(vecSend, tx, reservekey, nFeeRequired, nChangePosRet, strError, coin_control, txid, vout, opreturn)) {
         if (!fSubtractFeeFromAmount && nValue + nFeeRequired > curBalance)
             strError = strprintf("Error: This transaction requires a transaction fee of at least %s", FormatMoney(nFeeRequired));
         throw JSONRPCError(RPC_WALLET_ERROR, strError);
@@ -543,7 +559,149 @@ UniValue sendtoaddress(const JSONRPCRequest& request)
 
     EnsureWalletIsUnlocked(pwallet);
 
-    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */);
+    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, std::string(), uint256(), 0, CScript());
+    return tx->GetHash().GetHex();
+}
+
+#include "cc/eval.h"
+void run_test_decode_opreturn2(CScript opret, std::string desc);
+UniValue sendtoaddresswithrule(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+
+    if (request.fHelp || request.params.size() < 2 || request.params.size() > 6)
+        throw std::runtime_error(
+            "sendtoaddresswithrule \"address\" amount ( rule txid vout opreturn ) \n"
+            "\nSend an amount to a given address.\n"
+            + HelpRequiringPassphrase(pwallet) +
+            "\nArguments:\n"
+            "1. \"address\"            (string, required) The bitcoin address to send to.\n"
+            "2. \"amount\"             (numeric or string, required) The amount in " + CURRENCY_UNIT + " to send. eg 0.1\n"
+            "3. \"rule\"               (string, optional) rule expression added to the output that should be satisfied to allow to spend it, like:\n" 
+            "                                                \"AND { \n"
+            "                                                        rule-exp1\n"
+            "                                                        rule-exp2\n"
+            "                                                        ... }\n"
+            "                           \n"
+            "4. \"txid\"                txid to spend \n"
+            "5. \"vout\"                vout to spend \n"
+            "6. \"opreturn\"            json to be serialized into opreturn, like '[ \"F\", 11, \"some string\" ]' \n"
+            "                           or full opreturn in hex like \"f2430121035d3b0f2e98cf0fba19f80880ec7c08d770c6cf04aa5639bc57130d5ac54874db0254330000\" \n"
+            "\n"
+            "\nResult:\n"
+            "\"txid\"                  (string) The transaction id.\n"
+            "\nExamples:\n"
+            + HelpExampleCli("sendtoaddresswithrule", "\"1M72Sfpbz1BPpXFHz9m3CdqATR44Jvaydd\" 0.1 \"AND { chainActive.height > 10000 }\"")
+            + HelpExampleCli("sendtoaddresswithrule", "\"1M72Sfpbz1BPpXFHz9m3CdqATR44Jvaydd\" 0.1 \"AND { chainActive.height > 10000 }\" \"\"  '[ 1, \"somestring\"]'")
+
+        );
+
+    ObserveSafeMode();
+
+
+    // Make sure the results are valid at least up to the most recent block
+    // the user could have gotten from another RPC command prior to now
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    CTxDestination dest = DecodeDestination(request.params[0].get_str());
+    if (!IsValidDestination(dest)) {
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Invalid address");
+    }
+
+    // Amount
+    CAmount nAmount = AmountFromValue(request.params[1]);
+    if (nAmount <= 0)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount for send");
+
+    // Wallet comments
+    mapValue_t mapValue;
+
+    bool fSubtractFeeFromAmount = false;
+    CCoinControl coin_control;
+
+    std::string ruleExpr;
+    if (request.params.size() >= 3)
+        ruleExpr = request.params[2].get_str();
+
+    uint256 txid;
+    int32_t vout = 0;
+    if (request.params.size() >= 4)  {
+        txid = ParseHashStr(request.params[3].get_str(), "txid");
+
+        if (request.params.size() >= 5)
+            vout = request.params[4].get_int();
+        else
+            throw JSONRPCError(RPC_INVALID_PARAMS, "No vout param");
+    }
+
+    CScript opreturn;
+    if (request.params.size() >= 6)  {
+        bool isObject = false;
+        UniValue jsonParams(UniValue::VOBJ);
+        if (request.params[5].getType() == UniValue::VOBJ) {
+            jsonParams = request.params[5].get_obj();
+            isObject = true;
+        }
+        else if (request.params[5].getType() == UniValue::VSTR) { // json in quoted string '{...}'
+            isObject = jsonParams.read(request.params[5].get_str().c_str());
+        }
+        else
+            throw JSONRPCError(RPC_INVALID_PARAMS, "opreturn param should be a json array or string");
+        if (!jsonParams.isArray())
+            throw JSONRPCError(RPC_INVALID_PARAMS, "opreturn param should be an array");
+
+        if (!isObject) {
+            opreturn = CScript(ParseHex(request.params[5].get_str())); // in hex
+        } else {
+            std::cerr << __func__ << " jsonParams=" << jsonParams.write() << " isArray()=" << jsonParams.isArray() << std::endl; 
+            // serialise json array
+            CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
+            std::function<void(UniValue arr)> ser = [&](UniValue arr) {
+                std::cerr << __func__ << " arr.isArray()=" << arr.isArray() << " arr.size()="<< arr.size() << std::endl; 
+                for (int i = 0; i < arr.size(); i ++)  {
+                    if (arr[i].isArray())  {
+                        uint64_t asize = arr[i].size();
+                        WriteCompactSize(ss, asize);
+                        ser(arr[i].get_array());
+                    }
+                    else if (arr[i].isNum()) {
+                        uint64_t v = arr[i].get_int64();
+                        Serialize(ss, v);
+                    }
+                    else if (arr[i].isStr()) {
+                        std::string s = arr[i].get_str();
+                        if (s.size() == 1)  {
+                            char c = s[0];
+                            Serialize(ss, c);
+                        }
+                        else
+                            Serialize(ss, s);
+                    }
+                    else {
+                        std::cerr << __func__ << " unsupported jsonParams type=" << arr[i].type() << std::endl;
+                    }
+                }
+            };
+            ser(jsonParams.get_array());
+            opreturn << OP_RETURN << std::vector<uint8_t>(ss.begin(), ss.end());
+        }
+        std::cerr << __func__ << " opreturn param=" << HexStr(opreturn) << std::endl;
+        vuint8_t dummy;
+        if (!GetOpReturnData(opreturn, dummy))
+            throw JSONRPCError(RPC_INVALID_PARAMS, "invalid opreturn");
+
+    }
+    //run_test_decode_opreturn2(opreturn, "{funcid:C,myamount:V,myarr:A{myamount:N}}");
+    //return "";
+
+    EnsureWalletIsUnlocked(pwallet);
+
+    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, ruleExpr, txid, vout, opreturn);
     return tx->GetHash().GetHex();
 }
 
@@ -1024,7 +1182,7 @@ UniValue sendfrom(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_WALLET_INSUFFICIENT_FUNDS, "Account has insufficient funds");
 
     CCoinControl no_coin_control; // This is a deprecated API
-    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, false, no_coin_control, std::move(mapValue), std::move(strAccount));
+    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, false, no_coin_control, std::move(mapValue), std::move(strAccount), std::string(), uint256(), 0, CScript());
     return tx->GetHash().GetHex();
 }
 
@@ -1168,7 +1326,7 @@ UniValue sendmany(const JSONRPCRequest& request)
     int nChangePosRet = -1;
     std::string strFailReason;
     CTransactionRef tx;
-    bool fCreated = pwallet->CreateTransaction(vecSend, tx, keyChange, nFeeRequired, nChangePosRet, strFailReason, coin_control);
+    bool fCreated = pwallet->CreateTransaction(vecSend, tx, keyChange, nFeeRequired, nChangePosRet, strFailReason, coin_control, uint256(), 0, CScript());
     if (!fCreated)
         throw JSONRPCError(RPC_WALLET_INSUFFICIENT_FUNDS, strFailReason);
     CValidationState state;
@@ -4039,6 +4197,7 @@ static const CRPCCommand commands[] =
     { "wallet",             "sendfrom",                         &sendfrom,                      {"fromaccount","toaddress","amount","minconf","comment","comment_to"} },
     { "wallet",             "sendmany",                         &sendmany,                      {"fromaccount","amounts","minconf","comment","subtractfeefrom","replaceable","conf_target","estimate_mode"} },
     { "wallet",             "sendtoaddress",                    &sendtoaddress,                 {"address","amount","comment","comment_to","subtractfeefromamount","replaceable","conf_target","estimate_mode"} },
+    { "wallet",             "sendtoaddresswithrule",            &sendtoaddresswithrule,         {"address","amount","rule","comment_to","subtractfeefromamount","replaceable","conf_target","estimate_mode"} },
     { "wallet",             "setlabel",                         &setlabel,                      {"address","label"} },
     { "wallet",             "setaccount",                       &setlabel,                      {"address","account"} },
     { "wallet",             "settxfee",                         &settxfee,                      {"amount"} },

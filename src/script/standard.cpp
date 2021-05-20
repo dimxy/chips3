@@ -11,6 +11,8 @@
 #include <util.h>
 #include <utilstrencodings.h>
 
+#include <iostream>
+#include <key_io.h>
 
 typedef std::vector<unsigned char> valtype;
 
@@ -33,6 +35,7 @@ const char* GetTxnOutputType(txnouttype t)
     case TX_WITNESS_V0_KEYHASH: return "witness_v0_keyhash";
     case TX_WITNESS_V0_SCRIPTHASH: return "witness_v0_scripthash";
     case TX_WITNESS_UNKNOWN: return "witness_unknown";
+    case TX_PUBKEYHASH_WITH_TXRULE: return "pubkeyhash_with_txrule";
     }
     return nullptr;
 }
@@ -51,6 +54,9 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
 
         // Sender provides N pubkeys, receivers provides M signatures
         mTemplates.insert(std::make_pair(TX_MULTISIG, CScript() << OP_SMALLINTEGER << OP_PUBKEYS << OP_SMALLINTEGER << OP_CHECKMULTISIG));
+
+        // PKH extended with tx rules:
+        mTemplates.insert(std::make_pair(TX_PUBKEYHASH_WITH_TXRULE, CScript() << OP_DUP << OP_HASH160 << OP_PUBKEYHASH << OP_EQUALVERIFY << OP_CHECKSIGVERIFY << OP_TXRULE << OP_EVALTXRULES));
     }
 
     vSolutionsRet.clear();
@@ -110,8 +116,10 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
 
     // Scan templates
     const CScript& script1 = scriptPubKey;
+    //std::cerr << __func__ << " script1=" << HexStr(script1) << std::endl;
     for (const std::pair<txnouttype, CScript>& tplate : mTemplates)
     {
+        //std::cerr << __func__ << " new template.." << std::endl;
         const CScript& script2 = tplate.second;
         vSolutionsRet.clear();
 
@@ -142,6 +150,7 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
             if (!script2.GetOp(pc2, opcode2, vch2))
                 break;
 
+//std::cerr << __func__ << " opcode1=" << opcode1 << " vch1=" << HexStr(vch1) << " opcode2=" << opcode2 << " vch2=" << HexStr(vch2) << std::endl;
             // Template matching opcodes:
             if (opcode2 == OP_PUBKEYS)
             {
@@ -180,9 +189,15 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
                 else
                     break;
             }
+            else if (opcode2 == OP_TXRULE)
+            {
+                // skip. Maybe add to vSolutions?
+                //std::cerr << __func__ << " OP_TXRULE found" << std::endl;
+            }
             else if (opcode1 != opcode2 || vch1 != vch2)
             {
                 // Others must match exactly
+                //std::cerr << __func__ << " opcode1 != opcode2 || vch1 != vch2, breaking..." << std::endl;
                 break;
             }
         }
@@ -234,6 +249,12 @@ bool ExtractDestination(const CScript& scriptPubKey, CTxDestination& addressRet)
         std::copy(vSolutions[1].begin(), vSolutions[1].end(), unk.program);
         unk.length = vSolutions[1].size();
         addressRet = unk;
+        return true;
+    }
+    else if (whichType == TX_PUBKEYHASH_WITH_TXRULE)
+    {
+        addressRet = CKeyID(uint160(vSolutions[0]));
+        //std::cerr << __func__ << " found TX_PUBKEYHASH_WITH_TXRULE dest addressRet=" << EncodeDestination(addressRet) << std::endl;
         return true;
     }
     // Multisig txns have more than one address...
@@ -334,6 +355,14 @@ CScript GetScriptForDestination(const CTxDestination& dest)
     CScript script;
 
     boost::apply_visitor(CScriptVisitor(&script), dest);
+    return script;
+}
+
+CScript GetScriptForDestinationAndRule(const CKeyID &keyID, const std::string &rule)
+{
+    CScript script;
+
+    script << OP_DUP << OP_HASH160 << ToByteVector(keyID) << OP_EQUALVERIFY << OP_CHECKSIGVERIFY << std::vector<uint8_t>(rule.begin(), rule.end()) << OP_EVALTXRULES;
     return script;
 }
 

@@ -171,6 +171,8 @@ enum opcodetype
     OP_CHECKMULTISIGVERIFY = 0xaf,
     OP_CHECKCRYPTOCONDITION = 0xcc,
     OP_CHECKCRYPTOCONDITIONVERIFY = 0xcd,
+    OP_EVALTXRULES = 0xd1,
+    OP_EVALTXRULESVERIFY = 0xd2,
 
 
     // expansion
@@ -189,6 +191,7 @@ enum opcodetype
 
 
     // template matching params
+    OP_TXRULE = 0xf9,
     OP_SMALLINTEGER = 0xfa,
     OP_PUBKEYS = 0xfb,
     OP_CRYPTOCONDITION = 0xfc,
