@@ -33,9 +33,11 @@ EOL
 }
 
 buildCHIPS() {
+    # TRIPLET=`./depends/config.guess`
+    # CHIPS_PREFIX="$(pwd)/depends/$TRIPLET"
     git pull
     ./autogen.sh
-    ./configure LDFLAGS="-L${CHIPS_PREFIX}/lib/" CPPFLAGS="-I${CHIPS_PREFIX}/include/" --with-gui=no --disable-tests --disable-bench --without-miniupnpc --enable-experimental-asm --enable-static --disable-shared
+    ./configure LDFLAGS="-L${CHIPS_PREFIX}/lib/" CPPFLAGS="-I${CHIPS_PREFIX}/include/" --with-gui=no --disable-tests --disable-bench --without-miniupnpc --enable-experimental-asm --enable-static --disable-shared --enable-debug=yes
     make -j$(nproc)
 }
 berkeleydb
