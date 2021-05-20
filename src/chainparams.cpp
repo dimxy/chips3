@@ -412,8 +412,12 @@ public:
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = true;
         consensus.fPowNoRetargeting = true;
+        consensus.nPowAveragingWindow = 1;  // prevent div by zero
         consensus.nRuleChangeActivationThreshold = 108; // 75% for testchains
         consensus.nMinerConfirmationWindow = 144; // Faster than normal for regtest (144 instead of 2016)
+        
+        consensus.nAdaptivePoWActivationThreshold = 10000000; // do not allow adaptive pow to make regtest blocks fast
+
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 0;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = Consensus::BIP9Deployment::NO_TIMEOUT;
@@ -437,10 +441,30 @@ public:
         nDefaultPort = 18444;
         nPruneAfterHeight = 1000;
 
-        genesis = CreateGenesisBlock(1296688602, 2, 0x207fffff, 1, 50 * COIN);
+        genesis = CreateGenesisBlock(1296688602, 9363626, 0x207fffff, 1, 50 * COIN);
         consensus.hashGenesisBlock = genesis.GetHash();
-        assert(consensus.hashGenesisBlock == uint256S("0x0f9188f13cb7b2c71f2a335e3a4fc328bf5beb436012afca590b1a11466e2206"));
-        assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
+
+        /*int32_t z; uint32_t nonce; uint8_t *ptr = (uint8_t *)&consensus.hashGenesisBlock;
+        for (nonce=9250234; nonce<500000000; nonce++)
+        {
+            genesis = CreateGenesisBlock(1296688602, nonce, 0x207fffff, 1, 50 * COIN);
+            consensus.hashGenesisBlock = genesis.GetHash();
+            if ( ptr[31] == 0 && ptr[30] == 0 )//&& ptr[29] == 0 && (ptr[28] & 0x80) == 0)
+                break;
+            if ( (nonce % 1000000) == 999999 )
+                fprintf(stderr,"%d ",nonce);
+        }
+        printf("nonce.%u\n",nonce);
+        for (z=31; z>=0; z--)
+            printf("%02x",ptr[z]);
+        printf(" <- genesis\n");
+        ptr = (uint8_t *)&genesis.hashMerkleRoot;
+        for (z=31; z>=0; z--)
+            printf("%02x",ptr[z]);
+        printf(" <- merkle\n");*/
+
+        assert(consensus.hashGenesisBlock == uint256S("0x00004f0faf7b46737d0f2dba422b82e8f38e0a71e346b0481a1edf7abd031282"));
+        assert(genesis.hashMerkleRoot == uint256S("0x9bd1c477af8993947cdd9052c0e4c287fda95987b3cc8934b3769d7503852715"));
 
         vFixedSeeds.clear(); //!< Regtest mode doesn't have any fixed seeds.
         vSeeds.clear();      //!< Regtest mode doesn't have any DNS seeds.
