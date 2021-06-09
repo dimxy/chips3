@@ -36,6 +36,7 @@ const char* GetTxnOutputType(txnouttype t)
     case TX_WITNESS_V0_SCRIPTHASH: return "witness_v0_scripthash";
     case TX_WITNESS_UNKNOWN: return "witness_unknown";
     case TX_PUBKEYHASH_WITH_TXRULE: return "pubkeyhash_with_txrule";
+    case TX_MULTISIG_WITH_TXRULE: return "multisig_with_txrule";
     }
     return nullptr;
 }
@@ -57,6 +58,10 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
 
         // PKH extended with tx rules:
         mTemplates.insert(std::make_pair(TX_PUBKEYHASH_WITH_TXRULE, CScript() << OP_DUP << OP_HASH160 << OP_PUBKEYHASH << OP_EQUALVERIFY << OP_CHECKSIGVERIFY << OP_TXRULE << OP_EVALTXRULES));
+
+        // Multisig extended with tx rules:
+        mTemplates.insert(std::make_pair(TX_MULTISIG_WITH_TXRULE, CScript() << OP_SMALLINTEGER << OP_PUBKEYS << OP_SMALLINTEGER << OP_CHECKMULTISIGVERIFY << OP_TXRULE << OP_EVALTXRULES));
+
     }
 
     vSolutionsRet.clear();
@@ -138,6 +143,14 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
                 if (typeRet == TX_MULTISIG)
                 {
                     // Additional checks for TX_MULTISIG:
+                    unsigned char m = vSolutionsRet.front()[0];
+                    unsigned char n = vSolutionsRet.back()[0];
+                    if (m < 1 || n < 1 || m > n || vSolutionsRet.size()-2 != n)
+                        return false;
+                }
+                if (typeRet == TX_MULTISIG_WITH_TXRULE)
+                {
+                    // Additional checks for TX_MULTISIG_WITH_RULE:
                     unsigned char m = vSolutionsRet.front()[0];
                     unsigned char n = vSolutionsRet.back()[0];
                     if (m < 1 || n < 1 || m > n || vSolutionsRet.size()-2 != n)
@@ -363,6 +376,18 @@ CScript GetScriptForDestinationAndRule(const CKeyID &keyID, const std::string &r
     CScript script;
 
     script << OP_DUP << OP_HASH160 << ToByteVector(keyID) << OP_EQUALVERIFY << OP_CHECKSIGVERIFY << std::vector<uint8_t>(rule.begin(), rule.end()) << OP_EVALTXRULES;
+    return script;
+}
+
+CScript GetScriptForMofNAndRule(int nRequired, const std::vector<CPubKey> &destpks, const std::string &rule)
+{
+    CScript script;
+
+    script << CScript::EncodeOP_N(nRequired);
+    for (const CPubKey& key : destpks)
+        script << ToByteVector(key);
+    script << CScript::EncodeOP_N(destpks.size()) << OP_CHECKMULTISIGVERIFY;
+    script << std::vector<uint8_t>(rule.begin(), rule.end()) << OP_EVALTXRULES;
     return script;
 }
 

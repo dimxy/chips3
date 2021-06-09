@@ -111,7 +111,7 @@ int ServerTransactionSignatureChecker::CheckEvalCondition(const CC *cond) const
 }
 
 // run script extension rule evaluator
-int ServerTransactionSignatureChecker::CheckTxRules(const std::vector<unsigned char>& data) const
+int ServerTransactionSignatureChecker::CheckTxRules(const std::vector<uint8_t>& data) const
 {
     CRuleProc ruleproc;
     ruleproc.init();
@@ -122,11 +122,11 @@ int ServerTransactionSignatureChecker::CheckTxRules(const std::vector<unsigned c
     if ((r = ruleproc.compile(expr, error)) != RULE_OKAY)
         return r;*/
 
-    return ruleproc.eval(expr, *txTo, error);  // compile and execute
+    return ruleproc.eval(expr, *txTo, nIn, error);  // compile and execute
 }
 
 // only compile rule (to just check syntax while signature is produced)
-int SkipRuleTransactionSignatureChecker::CheckTxRules(const std::vector<unsigned char>& data) const
+int SkipRuleTransactionSignatureChecker::CheckTxRules(const std::vector<uint8_t>& data) const
 {
     CRuleProc ruleproc;
     std::string error;

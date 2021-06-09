@@ -51,7 +51,7 @@ public:
 
     bool VerifySignature(const std::vector<unsigned char>& vchSig, const CPubKey& vchPubKey, const uint256& sighash) const override;
     int CheckEvalCondition(const CC *cond) const;
-    int CheckTxRules(const std::vector<unsigned char>& data) const override;
+    int CheckTxRules(const std::vector<uint8_t>& data) const override;
 };
 
 // we need this only to move lib references from standard.cpp
@@ -60,7 +60,7 @@ class SkipRuleTransactionSignatureChecker : public TransactionSignatureChecker
 public:
     SkipRuleTransactionSignatureChecker(const CTransaction* txToIn, unsigned int nInIn, const CAmount& amountIn) : 
         TransactionSignatureChecker(txToIn, nInIn, amountIn) {}
-    int CheckTxRules(const std::vector<unsigned char>& data) const override;
+    int CheckTxRules(const std::vector<uint8_t>& data) const override;
 };
 
 class SkipRuleTransactionSignatureCreator : public TransactionSignatureCreator {

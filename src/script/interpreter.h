@@ -164,7 +164,7 @@ public:
         return false;
     }
 
-    virtual int CheckTxRules(const std::vector<unsigned char>& data) const 
+    virtual int CheckTxRules(const std::vector<uint8_t>& data) const 
     {
         std::cerr << __func__ << " internal script error: base function called always false" << std::endl;
         return false;
