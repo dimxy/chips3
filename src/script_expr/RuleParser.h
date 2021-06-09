@@ -278,10 +278,14 @@ class RuleStatementAnd : public RuleStatementBase
             // be checked for "return" or "throw" behaviors.
             packToken rstmt = stmt->exec(scope);
 
-            result = result && rstmt.asBool();
-            std::cerr << "RuleStatementAnd::" << __func__ << " result=" << result << std::endl;
-
+            if (rstmt->type == cparse::BOOL) {
+                std::cerr << "RuleStatementAnd::" << __func__ << " stmt result=" << rstmt.asBool() << std::endl;
+                result = result && rstmt.asBool();
+                if (!result)
+                    break;
+            }
         }
+        std::cerr << "RuleStatementAnd::" << __func__ << " exited with " << result << std::endl;
         return result;
     }
 
@@ -302,6 +306,7 @@ class RuleStatementOr : public RuleStatementBase
 {
     returnState _exec(TokenMap scope) const
     {
+        std::cerr << "RuleStatementOr::" << __func__ << " enterred" << std::endl;
         // Returned value:
         packToken rv = false;
         for (const auto stmt : _blockstmt.list)
@@ -309,9 +314,13 @@ class RuleStatementOr : public RuleStatementBase
             // In a more complete implementation, `rv` should
             // be checked for "return" or "throw" behaviors.
             rv = stmt->exec(scope);
-            if (rv.asBool())
-                break;
+            if (rv->type == cparse::BOOL) {
+                std::cerr << "RuleStatementOr::" << __func__ << " stmt result=" << rv << std::endl;
+                if (rv.asBool())
+                    break;
+            }
         }
+        std::cerr << "RuleStatementOr::" << __func__ << " exited with " << rv << std::endl;
         return rv;
     }
 

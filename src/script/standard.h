@@ -58,6 +58,7 @@ enum txnouttype
     TX_WITNESS_V0_KEYHASH,
     TX_WITNESS_UNKNOWN, //!< Only for Witness versions not already defined above
     TX_PUBKEYHASH_WITH_TXRULE,
+    TX_MULTISIG_WITH_TXRULE,
 };
 
 class CNoDestination {
@@ -172,6 +173,12 @@ CScript GetScriptForRawPubKey(const CPubKey& pubkey);
 
 /** Generate a multisig script. */
 CScript GetScriptForMultisig(int nRequired, const std::vector<CPubKey>& keys);
+
+/**
+ * Generate a Bitcoin scriptPubKey for multisig extended with a rule expression as script extension.
+ */
+CScript GetScriptForMofNAndRule(int nRequired, const std::vector<CPubKey> &destpks, const std::string &rule);
+
 
 /**
  * Generate a pay-to-witness script for the given redeem script. If the redeem

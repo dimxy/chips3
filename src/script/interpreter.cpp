@@ -284,8 +284,16 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
             //
             if (!script.GetOp(pc, opcode, vchPushValue))
                 return set_error(serror, SCRIPT_ERR_BAD_OPCODE);
-            if (vchPushValue.size() > MAX_SCRIPT_ELEMENT_SIZE)
-                return set_error(serror, SCRIPT_ERR_PUSH_SIZE);
+            if (vchPushValue.size() > MAX_SCRIPT_ELEMENT_SIZE)  {
+                CScript::const_iterator nextpc = pc;
+                opcodetype nextop = OP_0;
+                valtype vchDummy;
+                if (!script.GetOp(nextpc, nextop, vchDummy) ||
+                    (nextop != OP_EVALTXRULES && opcode != OP_EVALTXRULESVERIFY))  {
+                    return set_error(serror, SCRIPT_ERR_PUSH_SIZE);
+                }
+                std::cerr << __func__ << " informational: push exceded limit for OP_EVALTXRULES" << std::endl;
+            }
 
             // Note how OP_RESERVED does not count towards the opcode limit.
             if (opcode > OP_16 && ++nOpCount > MAX_OPS_PER_SCRIPT)
@@ -1057,20 +1065,25 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                 case OP_EVALTXRULES:
                 case OP_EVALTXRULESVERIFY:
                 {
+                    std::cerr << __func__ << " OP_EVALTXRULES begin" << std::endl;
                     if (!(flags & SCRIPT_VERIFY_TXRULES)) {
                         // not enabled; treat as a NOP...?
+                        std::cerr << __func__ << " OP_EVALTXRULES not enabled" << std::endl;
                         break;
                     }
                     //if (!IsTxRulesEnabled()) {
                     //    goto INTERPRETER_DEFAULT; // TODO: check this?
                     //}
 
-                    if (stack.size() < 1)
+                    if (stack.size() < 1) {
+                        std::cerr << __func__ << " OP_EVALTXRULES invalid stack size=" << stack.size() << std::endl;
                         return set_error(serror, SCRIPT_ERR_INVALID_STACK_OPERATION);
+                    }
 
                     int fResult = checker.CheckTxRules(stacktop(-1));
 
                     if (fResult < 0) {
+                        std::cerr << __func__ << " OP_EVALTXRULES checker.CheckTxRules=" << fResult << std::endl;
                         return set_error(serror, SCRIPT_ERR_INVALID_TXRULES);
                     }
 
@@ -1082,9 +1095,12 @@ bool EvalScript(std::vector<std::vector<unsigned char> >& stack, const CScript& 
                     {
                         if (fResult > 0)
                             popstack(stack);
-                        else
+                        else {
+                            std::cerr << __func__ << " OP_EVALTXRULESVERIFY error verify fResult=" << fResult << std::endl;
                             return set_error(serror, SCRIPT_ERR_TXRULES_VERIFY);
+                        }
                     }
+                    std::cerr << __func__ << " OP_EVALTXRULES end" << std::endl;
                 }
 
                 break;
@@ -1562,14 +1578,18 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
             // serror is set
             return false;
     }
-    else if (!EvalScript(stack, scriptSig, flags, checker, SigVersion::BASE, serror))
+    else if (!EvalScript(stack, scriptSig, flags, checker, SigVersion::BASE, serror)) {
         // serror is set
+        std::cerr << __func__ << " EvalScript failed error=" << ScriptErrorString(*serror) << std::endl;
         return false;
+    }
     if (flags & SCRIPT_VERIFY_P2SH)
         stackCopy = stack;
-    if (!EvalScript(stack, scriptPubKey, flags, checker, SigVersion::BASE, serror))
+    if (!EvalScript(stack, scriptPubKey, flags, checker, SigVersion::BASE, serror)) {
         // serror is set
+        std::cerr << __func__ << " EvalScript failed error=" << ScriptErrorString(*serror) << std::endl;
         return false;
+    }
     if (stack.empty())
         return set_error(serror, SCRIPT_ERR_EVAL_FALSE);
     if (CastToBool(stack.back()) == false)

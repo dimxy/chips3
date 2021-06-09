@@ -37,6 +37,8 @@
 
 #include <univalue.h>
 
+
+#include <script/serverchecker.h>
 #include "script_expr/RuleProc.h"
 
 static const std::string WALLET_ENDPOINT_BASE = "/wallet/";
@@ -420,7 +422,7 @@ UniValue getaddressesbyaccount(const JSONRPCRequest& request)
     return ret;
 }
 
-static CTransactionRef SendMoney(CWallet * const pwallet, const CTxDestination &address, CAmount nValue, bool fSubtractFeeFromAmount, const CCoinControl& coin_control, mapValue_t mapValue, std::string fromAccount, const std::string &rule, uint256 txid, int32_t vout, CScript opreturn)
+static CTransactionRef SendMoney(CWallet * const pwallet, const CTxDestination &address, const std::vector<CPubKey> &destpks,  CAmount nValue, bool fSubtractFeeFromAmount, const CCoinControl& coin_control, mapValue_t mapValue, std::string fromAccount, const std::string &rule, uint256 txid, int32_t vout, CScript opreturn)
 {
     CAmount curBalance = pwallet->GetBalance();
 
@@ -448,7 +450,10 @@ static CTransactionRef SendMoney(CWallet * const pwallet, const CTxDestination &
             throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Could not parse rule expression: ") + error);
         }
         std::cerr << __func__ << " address.type().name()=" << address.type().name() << " address.which()=" << address.which() << std::endl;
-        scriptPubKey = GetScriptForDestinationAndRule(boost::get<CKeyID>(address), rule);
+        if (destpks.empty())
+            scriptPubKey = GetScriptForDestinationAndRule(boost::get<CKeyID>(address), rule);
+        else
+            scriptPubKey = GetScriptForMofNAndRule(1, destpks, rule);
     }
 
     // Create and send the transaction
@@ -559,7 +564,7 @@ UniValue sendtoaddress(const JSONRPCRequest& request)
 
     EnsureWalletIsUnlocked(pwallet);
 
-    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, std::string(), uint256(), 0, CScript());
+    CTransactionRef tx = SendMoney(pwallet, dest, {}, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, std::string(), uint256(), 0, CScript());
     return tx->GetHash().GetHex();
 }
 
@@ -700,8 +705,7 @@ UniValue sendtoaddresswithrule(const JSONRPCRequest& request)
     //return "";
 
     EnsureWalletIsUnlocked(pwallet);
-
-    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, ruleExpr, txid, vout, opreturn);
+    CTransactionRef tx = SendMoney(pwallet, dest, {}, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, ruleExpr, txid, vout, opreturn);
     return tx->GetHash().GetHex();
 }
 
@@ -1182,7 +1186,7 @@ UniValue sendfrom(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_WALLET_INSUFFICIENT_FUNDS, "Account has insufficient funds");
 
     CCoinControl no_coin_control; // This is a deprecated API
-    CTransactionRef tx = SendMoney(pwallet, dest, nAmount, false, no_coin_control, std::move(mapValue), std::move(strAccount), std::string(), uint256(), 0, CScript());
+    CTransactionRef tx = SendMoney(pwallet, dest, {}, nAmount, false, no_coin_control, std::move(mapValue), std::move(strAccount), std::string(), uint256(), 0, CScript());
     return tx->GetHash().GetHex();
 }
 
@@ -4135,6 +4139,392 @@ UniValue getaddressinfo(const JSONRPCRequest& request)
     return ret;
 }
 
+UniValue dicefund(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+    if (request.fHelp || request.params.size() != 4)
+        throw std::runtime_error(
+            "dicefund mypk bettorpk hentropy amount\n"
+        );
+
+    ObserveSafeMode();
+
+
+    // Make sure the results are valid at least up to the most recent block
+    // the user could have gotten from another RPC command prior to now
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    std::string mypkHex = request.params[0].get_str();
+    CPubKey mypk(ParseHex(mypkHex));
+    if (!mypk.IsFullyValid())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid my pk");
+
+    std::string betpkHex = request.params[1].get_str();
+    CPubKey betpk(ParseHex(betpkHex));
+    if (!betpk.IsFullyValid())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid bettor pk");
+
+
+    std::string hentropyHex = request.params[2].get_str();
+    uint256 hentropy = ParseHashStr(hentropyHex, "hentropy");
+    if (hentropy.IsNull())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid entropy hash");
+    // Amount
+    CAmount nAmount = AmountFromValue(request.params[3]);
+    if (nAmount <= 0)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount for send");
+
+    // Wallet comments
+    mapValue_t mapValue;
+
+    bool fSubtractFeeFromAmount = false;
+    CCoinControl coin_control;
+    int64_t nLockTime = GetAdjustedTime() + 240; // lock for 4 min
+
+    // spk script to spend house funds:
+    std::string ruleExpr = 
+    "OR {    \n"
+    "  housetx = GetTransaction(evaltx.vin[0].hash) \n"
+    "  bettx = GetTransaction(evaltx.vin[1].hash) \n"
+    "  opretClaim = DecodeOpReturn(evaltx, \"{entropyHouse:H,entropyBet:H}\") \n"
+    "  opretBet = DecodeOpReturn(bettx, \"{win:I,loss:I}\") \n"  // bettx opreturn
+    "  adjLoss = opretBet.loss + int(opretBet.loss / (opretBet.loss + opretBet.win) * 2 / 100) \n" // adjusted loss chances for house advantage of 0,02
+    // bettor wins - takes house's funds in loss/win ratio:
+    "  AND { \n"
+    "    houseFunds = housetx.vout[evaltx.vin[0].n].nValue  \n"  // original house funds
+    "    houseBack = OutputsForScriptPubKey(evaltx, housetx.vout[evaltx.vin[0].n].scriptPubKey) \n"  // returned back house funds
+    "    Sha256(opretClaim.entropyHouse) == \"" + hentropyHex + "\"\n"  
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    Print(\"(houseFunds - houseBack) * opretBet.win=\", int((houseFunds - houseBack) * opretBet.win)) \n"
+    "    Print(\"(houseFunds * opretBet.loss=\", int(houseFunds * opretBet.loss)) \n"
+    "    int((houseFunds - houseBack) * opretBet.win) <= int(houseFunds * opretBet.loss) \n"  // bettor's/house's <= loss/win
+    "    IsSigner(evaltx, ivin, \"" + betpkHex + "\") \n" // signed by bettor
+    "  } \n" 
+    "  AND { \n"
+    //   house wins - takes all his funds back:
+    "    Sha256(opretClaim.entropyHouse) == \"" + hentropyHex + "\"\n"
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    IsSigner(evaltx, ivin, \"" + mypkHex + "\") \n"  // signed by house
+    "  } \n" 
+    "  AND { \n"
+    // house takes back his funds after timeout
+    "    evaltx.lockTime >= " + std::to_string(nLockTime) + "\n"
+    "    IsSigner(evaltx, ivin, \"" + mypkHex + "\") \n"
+    "  } \n"
+    "} ";
+
+    CScript opreturn;
+    EnsureWalletIsUnlocked(pwallet);
+    CTransactionRef tx = SendMoney(pwallet, CNoDestination(), { mypk, betpk }, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, ruleExpr, uint256(), 0, opreturn);
+    return tx->GetHash().GetHex();
+}
+
+UniValue dicebet(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+    if (request.fHelp || request.params.size() != 5)
+        throw std::runtime_error(
+            "dicebet mypk housepk hentropy amount win:loss\n"
+        );
+
+    ObserveSafeMode();
+
+
+    // Make sure the results are valid at least up to the most recent block
+    // the user could have gotten from another RPC command prior to now
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    std::string mypkHex = request.params[0].get_str();
+    CPubKey mypk(ParseHex(mypkHex));
+    if (!mypk.IsFullyValid())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid my pk");
+
+    std::string housepkHex = request.params[1].get_str();
+    CPubKey housepk(ParseHex(housepkHex));
+    if (!housepk.IsFullyValid())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid house pk");
+
+
+    std::string hentropyHex = request.params[2].get_str();
+    uint256 hentropy = ParseHashStr(hentropyHex, "hentropy");
+    if (hentropy.IsNull())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid entropy hash");
+    // Amount
+    CAmount nAmount = AmountFromValue(request.params[3]);
+    if (nAmount <= 0)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid amount for send");
+
+
+    std::size_t pos = request.params[4].get_str().find(":");
+    if (pos == std::string::npos)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid win:loss format");
+
+    int32_t oddsWin = atoi(request.params[4].get_str().substr(0, pos));
+    int32_t oddsLoss = atoi(request.params[4].get_str().substr(pos+1));
+
+    // Wallet comments
+    mapValue_t mapValue;
+
+    bool fSubtractFeeFromAmount = false;
+    CCoinControl coin_control;
+    int nLockTime = GetAdjustedTime() + 240; // lock for 4 min
+
+    // spk script to spend bettor funds:
+    std::string ruleExpr = 
+    "OR {    \n"
+    "  housetx = GetTransaction(evaltx.vin[0].hash) \n"
+    "  bettx = GetTransaction(evaltx.vin[1].hash) \n"
+    "  opretClaim = DecodeOpReturn(evaltx, \"{entropyHouse:H,entropyBet:H}\") \n"
+    "  opretBet = DecodeOpReturn(bettx, \"{win:I,loss:I}\") \n"  // bettx opreturn
+    "  adjLoss = opretBet.loss + int(opretBet.loss / (opretBet.loss + opretBet.win) * 2 / 100) \n" // adjusted loss for house advantage of 0,02
+    // bettor wins - takes all his funds back:
+    "  AND { \n"
+    "    Sha256(opretClaim.entropyBet) == \"" + hentropyHex + "\"\n"  
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    IsSigner(evaltx, ivin, \"" + mypkHex + "\") \n" // signed by bettor
+    "  } \n" 
+    "  AND { \n"
+    // house wins -  takes bettor funds in loss/win ratio:
+    "    bettorFunds = bettx.vout[evaltx.vin[1].n].nValue \n"  // original bettor funds
+    "    bettorBack = OutputsForScriptPubKey(evaltx, bettx.vout[evaltx.vin[1].n].scriptPubKey) \n"  // returned back bettor funds
+    "    Sha256(opretClaim.entropyBet) == \"" + hentropyHex + "\"\n"
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    Print(\"(bettorFunds - bettorBack) * opretBet.loss=\", int((bettorFunds - bettorBack) * opretBet.loss)) \n"
+    "    Print(\"(bettorFunds * opretBet.win=\", int(bettorFunds * opretBet.win)) \n"
+    "    int((bettorFunds - bettorBack) * opretBet.loss) <= int(bettorFunds * opretBet.win) \n"  // house's/bettor's <= win/loss
+    "    IsSigner(evaltx, ivin, \"" + housepkHex + "\") \n"  // signed by house
+    "  } \n" 
+    "  AND { \n"
+    // bettor takes back his funds after timeout
+    "    evaltx.lockTime >= " + std::to_string(nLockTime) + "\n"
+    "    IsSigner(evaltx, ivin, \"" + mypkHex + "\") \n"
+    "  } \n"
+    "} ";
+
+
+
+    CScript opreturn;
+    opreturn << OP_RETURN << E_MARSHAL(ss << oddsWin << oddsLoss);
+    
+    
+    //run_test_decode_opreturn2(opreturn, "{funcid:C,myamount:V,myarr:A{myamount:N}}");
+    //return "";
+
+    EnsureWalletIsUnlocked(pwallet);
+    CTransactionRef tx = SendMoney(pwallet, CNoDestination(), { mypk, housepk }, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, ruleExpr, uint256(), 0, opreturn);
+    return tx->GetHash().GetHex();
+}
+
+bool pubkey2addr(char *destaddr,uint8_t *pubkey33);
+
+// test provider which allows to sign only with one pk
+// just to select a pk to sign if wallet has several -  for testing
+class MySigningProvider : public SigningProvider
+{
+private:
+    const CWallet *pwallet;
+    CPubKey signpk;
+public:
+    MySigningProvider(const CWallet *pwallet_, const CPubKey &signpk_) : pwallet(pwallet_) , signpk(signpk_) {}
+    virtual ~MySigningProvider() { }
+    virtual bool GetCScript(const CScriptID &scriptid, CScript& script) const { return pwallet->GetCScript(scriptid, script); }
+    virtual bool GetPubKey(const CKeyID &address, CPubKey& pubkey) const  { 
+        bool r = pwallet->GetPubKey(address, pubkey); 
+        if (r && pubkey == signpk)
+            return r;
+        return false;
+    }
+    virtual bool GetKey(const CKeyID &address, CKey& key) const {
+            char signaddr[64]; 
+            vuint8_t vpk = vuint8_t(signpk.begin(), signpk.end());
+            pubkey2addr(signaddr, vpk.data());
+            CTxDestination dest = DecodeDestination(signaddr);
+            auto signid = boost::get<CKeyID>(&dest);
+            if (address == *signid)
+                return pwallet->GetKey(address, key); 
+            return false;
+        }
+};
+
+#define I_AM_HOUSE 1
+#define I_AM_BETTOR 2 
+UniValue diceclaim(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+    if (request.fHelp || request.params.size() != 6)
+        throw std::runtime_error(
+            "diceclaim h|b mypk entropy-house entropy-bet utxo-house utxo-bet\n"
+            "utxo-house, utxo-bet format is 'txid:vout'"
+        );
+
+    ObserveSafeMode();
+
+
+    // Make sure the results are valid at least up to the most recent block
+    // the user could have gotten from another RPC command prior to now
+    pwallet->BlockUntilSyncedToCurrentChain();
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    int whoami;
+    if (request.params[0].get_str() == "h")
+        whoami = I_AM_HOUSE;
+    else if (request.params[0].get_str() == "b")
+        whoami = I_AM_BETTOR;
+    else
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid 'h' or 'b' param");
+
+    std::string mypkHex = request.params[1].get_str();
+    CPubKey mypk(ParseHex(mypkHex));
+    if (!mypk.IsFullyValid())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid my pk");
+
+
+    std::string entropyHouseHex = request.params[2].get_str();
+    uint256 entropyHouse = ParseHashStr(entropyHouseHex, "entropy");
+    if (entropyHouse.IsNull())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid entropy house");
+
+    std::string entropyBetHex = request.params[3].get_str();
+    uint256 entropyBet = ParseHashStr(entropyBetHex, "entropy");
+    if (entropyBet.IsNull())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid entropy bet");
+
+    // TODO: add param check:
+    std::size_t pos1 = request.params[4].get_str().find(":");
+    if (pos1 == std::string::npos)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid utxo format");
+    uint256 txidhouse = ParseHashStr(request.params[4].get_str().substr(0, pos1), "txid");
+    size_t vouthouse = atoi(request.params[4].get_str().substr(pos1+1));
+
+    std::size_t pos2 = request.params[5].get_str().find(":");
+    if (pos2 == std::string::npos)
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid utxo format");
+    uint256 txidbet = ParseHashStr(request.params[5].get_str().substr(0, pos2), "txid");
+    size_t voutbet = atoi(request.params[5].get_str().substr(pos2+1));
+
+    CMutableTransaction txNew;
+    CAmount txfee = 10000;
+
+    txNew.nLockTime = GetAdjustedTime(); // set for OP_CHECKTIMELOCKVERIFY
+
+    txNew.vin.push_back(CTxIn(txidhouse, vouthouse, CScript()));
+    txNew.vin.push_back(CTxIn(txidbet, voutbet, CScript()));
+
+    uint256 hashBlock1, hashBlock2;
+    CTransactionRef txhouse, txbet;
+    if (!GetTransaction(txidhouse, txhouse, Params().GetConsensus(), hashBlock1, false) || hashBlock1.IsNull())
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Cant load house tx (maybe in mempool)");
+    if (!GetTransaction(txidbet, txbet, Params().GetConsensus(), hashBlock2, false) || hashBlock2.IsNull())
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Cant load bet tx (maybe in mempool)");
+
+    if (vouthouse < 0 || vouthouse >= txhouse->vout.size())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "house utxo vout invalid");
+
+    if (voutbet < 0 || voutbet >= txbet->vout.size())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "bet utxo vout invalid");
+
+    int32_t win, loss;
+    vuint8_t vopret;
+    if (!GetOpReturnData(txbet->vout.back().scriptPubKey, vopret) ||
+        !E_UNMARSHAL(vopret, ss >> win >> loss))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "could not parse bettx opreturn data");
+
+    if (whoami == I_AM_HOUSE) {
+        txNew.vout.push_back(CTxOut(txhouse->vout[vouthouse].nValue-txfee, GetScriptForRawPubKey(mypk)));  // spend all house funds back
+        // calc how much to spend from bettor funds:
+        CAmount bettorWinLoss = txhouse->vout[vouthouse].nValue * win / loss;
+        CAmount bettorSpend = bettorWinLoss > txbet->vout[voutbet].nValue ? txbet->vout[voutbet].nValue : bettorWinLoss;
+        txNew.vout.push_back(CTxOut(bettorSpend, GetScriptForRawPubKey(mypk)));  // spend all bettor funds in win/loss ratio
+
+        CAmount change = txbet->vout[voutbet].nValue - bettorSpend;
+        if (change > 100) // no dust
+            txNew.vout.push_back(CTxOut(change, txbet->vout[voutbet].scriptPubKey)); // send back bettor funds
+        std::cerr << __func__ << " bettorWinLoss=" << bettorWinLoss << " txhouse_vout_value=" << txhouse->vout[vouthouse].nValue << " bettorSpend=" << bettorSpend << " change=" << change << std::endl;
+    }
+    else if (whoami == I_AM_BETTOR) {
+        txNew.vout.push_back(CTxOut(txbet->vout[voutbet].nValue-txfee, GetScriptForRawPubKey(mypk)));  // spend all bettor funds back
+        // calc how much to spend from house funds:
+        CAmount houseWinLoss = txbet->vout[voutbet].nValue * loss / win;
+        CAmount houseSpend = houseWinLoss > txhouse->vout[vouthouse].nValue ? txhouse->vout[vouthouse].nValue : houseWinLoss;
+        txNew.vout.push_back(CTxOut(houseSpend, GetScriptForRawPubKey(mypk)));  // spend all bettor funds back
+
+        CAmount change = txhouse->vout[vouthouse].nValue - houseSpend;
+        if (change > 100) // no dust
+            txNew.vout.push_back(CTxOut(change, txhouse->vout[vouthouse].scriptPubKey)); // send back house funds
+        std::cerr << __func__ << " houseWinLoss=" << houseWinLoss << " txbet_vout_value=" << txhouse->vout[vouthouse].nValue << " houseSpend=" << houseSpend << " change=" << change << std::endl;
+
+    }
+
+
+    CScript opret;
+    opret << OP_RETURN << E_MARSHAL(ss << entropyHouse << entropyBet);
+    txNew.vout.push_back(CTxOut(0, opret));
+
+    CTransaction txNewConst(txNew);
+    std::vector<CAmount> vinvalues { txhouse->vout[vouthouse].nValue, txbet->vout[voutbet].nValue };
+    std::vector<CScript> spks { txhouse->vout[vouthouse].scriptPubKey, txbet->vout[voutbet].scriptPubKey };
+    for (size_t i = 0; i < txNew.vin.size(); i ++)
+    {
+        SignatureData sigdata;
+        const MySigningProvider onlymypk(pwallet, mypk);
+
+        // use signatore creator that skips rule eval:
+        if (!ProduceSignature(SkipRuleTransactionSignatureCreator(&onlymypk, &txNewConst, i, vinvalues[i], SIGHASH_ALL), spks[i], sigdata))
+        {
+            std::cerr << __func__ << " ProduceSignature failed" << std::endl;
+            throw JSONRPCError(RPC_TRANSACTION_ERROR, "signing failed");
+        } else {
+            UpdateTransaction(txNew, i, sigdata);
+        }
+    }
+    CValidationState state;
+    std::cerr << __func__ << " txnew signed=" << HexStr(E_MARSHAL(ss << txNew)) << std::endl;
+    bool res = AcceptToMemoryPool(mempool, state, MakeTransactionRef(txNew), nullptr /* pfMissingInputs */,
+                                nullptr /* plTxnReplaced */, false /* bypass_limits */, 0LL);
+    if (!res)
+        throw JSONRPCError(RPC_TRANSACTION_ERROR, "accept to mempool failed");
+    return txNew.GetHash().GetHex();
+}
+
+UniValue dicehentropy(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+    if (request.fHelp || request.params.size() != 1)
+        throw std::runtime_error(
+            "dicehentropy entropy-hex\n"
+        );
+
+    std::string entropyHex = request.params[0].get_str();
+    uint256 entropy = ParseHashStr(entropyHex, "entropy");
+    
+    CSHA256 sha;
+    vuint8_t hash32;
+    hash32.resize(CSHA256::OUTPUT_SIZE);
+    sha.Write(entropy.begin(), entropy.size());
+    sha.Finalize(hash32.data());
+    uint256 hentropy(hash32);
+    std::cerr << __func__ << " entropy=" << entropy.GetHex() << " hentropy=" << hentropy.GetHex() << std::endl;
+
+    return hentropy.GetHex();
+}
+
 extern UniValue abortrescan(const JSONRPCRequest& request); // in rpcdump.cpp
 extern UniValue dumpprivkey(const JSONRPCRequest& request); // in rpcdump.cpp
 extern UniValue importprivkey(const JSONRPCRequest& request);
@@ -4210,6 +4600,12 @@ static const CRPCCommand commands[] =
     { "wallet",             "rescanblockchain",                 &rescanblockchain,              {"start_height", "stop_height"} },
 
     { "generating",         "generate",                         &generate,                      {"nblocks","maxtries"} },
+
+    { "dice",         "dicefund",                         &dicefund,                      {} },
+    { "dice",         "dicebet",                         &dicebet,                      {} },
+    { "dice",         "diceclaim",                         &diceclaim,                      {} },
+    { "dice",         "dicehentropy",                         &dicehentropy,                      {} },
+
 };
 
 void RegisterWalletRPCCommands(CRPCTable &t)

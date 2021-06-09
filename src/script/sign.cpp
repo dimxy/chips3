@@ -107,6 +107,7 @@ static bool SignStep(const BaseSignatureCreator& creator, const CScript& scriptP
         return false;
 
     case TX_MULTISIG:
+    case TX_MULTISIG_WITH_TXRULE:
         ret.push_back(valtype()); // workaround CHECKMULTISIG bug
         return (SignN(vSolutions, creator, scriptPubKey, ret, sigversion));
 
@@ -186,7 +187,8 @@ bool ProduceSignature(const BaseSignatureCreator& creator, const CScript& fromPu
     sigdata.scriptSig = PushAll(result);
 
     // Test solution
-    return solved && VerifyScript(sigdata.scriptSig, fromPubKey, &sigdata.scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, creator.Checker());
+    ScriptError serror;
+    return solved && VerifyScript(sigdata.scriptSig, fromPubKey, &sigdata.scriptWitness, STANDARD_SCRIPT_VERIFY_FLAGS, creator.Checker(), &serror);
 }
 
 SignatureData DataFromTransaction(const CMutableTransaction& tx, unsigned int nIn)
@@ -406,8 +408,8 @@ public:
     {
         return true;
     }
-    // TODO: this is needed to allow to test scripts with txrule. Not clear why other script work without this, like CLTV...
-    int CheckTxRules(const std::vector<unsigned char>& data) const override      
+    // TODO: this is needed to allow to test scripts with txrule. Not clear why other scripts work without this, like CLTV...
+    int CheckTxRules(const std::vector<uint8_t>& data) const override      
     {
         return 1;
     }

@@ -8,9 +8,12 @@
 #include "streams.h"
 #include "serialize.h"
 #include "script/cc.h"
+#include <crypto/sha256.h>
 
+#include "script/serverchecker.h"
 #include "cc/eval.h"
 
+#include "gmp.h"
 
 #include "RuleParser.h"
 #include "RuleProc.h"
@@ -45,6 +48,7 @@ cparse::packToken get_active_chain()
     return obj_chain;
 }
 
+/*
 cparse::packToken get_eval(cparse::TokenMap scope)
 {
     cparse::TokenMap obj_eval = BASE_eval.getChild();
@@ -53,11 +57,12 @@ cparse::packToken get_eval(cparse::TokenMap scope)
 
     return obj_eval;
 }
+*/
 
 
 cparse::packToken get_transaction_as_TokenMap(const CTransaction &tx)
 {
-    cparse::TokenMap obj_tx = BASE_tx.getChild();
+    cparse::TokenMap txMap = BASE_tx.getChild();
 
     cparse::TokenList mvins;
     for (auto const &vin : tx.vin) {
@@ -66,7 +71,7 @@ cparse::packToken get_transaction_as_TokenMap(const CTransaction &tx)
         mvin["n"] = (int64_t)vin.prevout.n;
         cparse::TokenMap mscriptSig; 
         mscriptSig["isCC"] = vin.scriptSig.IsPayToCryptoCondition();
-        mscriptSig[PTR_SCRIPTSIG] = reinterpret_cast<int64_t>(&vin.scriptSig);
+        mscriptSig["data"] = HexStr(vin.scriptSig.data(), vin.scriptSig.data() + vin.scriptSig.size());
         mvin["scriptSig"] = mscriptSig;
         mvins.push(mvin);
     }
@@ -76,22 +81,24 @@ cparse::packToken get_transaction_as_TokenMap(const CTransaction &tx)
         cparse::TokenMap mvout;
         mvout["nValue"] = vout.nValue;
         cparse::TokenMap mspk; 
-        mspk[PTR_SCRIPTPUBKEY] = reinterpret_cast<int64_t>(&vout.scriptPubKey);
+        mspk["data"] = HexStr(vout.scriptPubKey.data(), vout.scriptPubKey.data() + vout.scriptPubKey.size());
         mspk["isCC"] = vout.scriptPubKey.IsPayToCryptoCondition();
         mvout["scriptPubKey"] = mspk;
         //mvout["isCC"] = vout.scriptPubKey.IsPayToCryptoCondition();
         mvouts.push(mvout);
     }
 
-    obj_tx["vin"] = mvins;
-    obj_tx["vout"] = mvouts;
+    txMap["vin"] = mvins;
+    txMap["vout"] = mvouts;
 
     uint256 dummytxid;
     std::vector<uint8_t> dummydata;
-    obj_tx["funcid"] = 'F'; //std::string(1, DecodeCCVMSampleInstanceOpRet(tx.vout.back().scriptPubKey, dummytxid, dummydata));
-    obj_tx[PTR_TX] = reinterpret_cast<int64_t>(&tx);
+    txMap["lockTime"] = (int64_t)tx.nLockTime; 
+    txMap["funcid"] = 'F'; 
+    txMap["data"] = HexStr(E_MARSHAL(ss << tx));
+    //obj_tx[PTR_TX] = reinterpret_cast<int64_t>(&tx);
 
-    return obj_tx;
+    return txMap;
 }
 
 cparse::packToken get_transaction(cparse::TokenMap scope)
@@ -122,6 +129,29 @@ cparse::packToken get_tx_height(cparse::TokenMap scope)
     return it != mapBlockIndex.end() ? it->second->nHeight : -1;
 }
 
+cparse::packToken sha256_for_hexstr(cparse::TokenMap scope)
+{
+    std::string hex = scope["hex"].asString();
+
+    uint256 entropy;
+    entropy.SetHex(hex);
+    if (entropy.IsNull()) {
+        std::cerr << __func__ << " could not parse source string to uint256=" << hex << std::endl;
+        return std::string();
+    }
+
+    
+    CSHA256 sha;
+    vuint8_t hash32;
+    hash32.resize(CSHA256::OUTPUT_SIZE);
+    sha.Write(entropy.begin(), entropy.size());
+    sha.Finalize(hash32.data());
+    uint256 hentropy(hash32);
+   
+    std::cerr << __func__ << " sourcehex=" << hex << " result hentropy=" << hentropy.GetHex() << std::endl;
+    return hentropy.GetHex();
+}
+
 /*
 cparse::packToken get_eval_tx(cparse::TokenMap scope)
 {
@@ -136,6 +166,7 @@ cparse::packToken get_eval_tx(cparse::TokenMap scope)
 
 void print_map(cparse::TokenMap m) 
 {
+    std::cerr << __func__ << " printing map:" << std::endl;
     for (auto e = m.map().begin(); e != m.map().end(); e++)  {
         std::cerr << "    " << e->first;
         switch(e->second.token()->type) 
@@ -159,66 +190,49 @@ void print_map(cparse::TokenMap m)
     }
 }
 
-
 /**
  * access opreturn in txMap and decode it according to the description passed in 'opreturnDesc'  
  * the description format example (be carefull, it might look like a json but it's not a json object):
- * "{funcid:C,height:I,amount:V,mystr:S,txid:H,myarray:A{prevtxid:H,prevheight:I}}"
+ * "{funcid:C,height:I,amount:V,bytes:B,mystr:S,txid:H,myarray:A{prevtxid:H,prevheight:I}}"
  */
-cparse::packToken decode_opreturn(cparse::TokenMap scope)
+static cparse::packToken decode_script(const vuint8_t vdata, const std::string &desc)
 {
-    //std::cerr << __func__ << " entered..." << std::endl;
-
-    cparse::TokenMap txMap = scope["txMap"].asMap();
-    std::string opretDesc = scope["opreturnDesc"].asString();
-    cparse::TokenList vouts = txMap["vout"].asList();
-    if (vouts.list().size() == 0)  {
-        std::cerr << __func__ << " opreturn parse error: no vouts" << std::endl;
-        return cparse::packToken();
-    }
-    CScript *pspk = reinterpret_cast<CScript*>( vouts.list().back().asMap()["scriptPubKey"].asMap()[PTR_SCRIPTPUBKEY].asInt() );
-
-    vuint8_t vdata;
-    if (!GetOpReturnData(*pspk, vdata))   {
-        std::cerr << __func__ << " opreturn parse error: last vout not opreturn" << std::endl;
-        return cparse::packToken();
-    }
-
-    cparse::TokenMap opretMap;
+    std::cerr << __func__ << " script=" << HexStr(vdata) << " desc=" << desc << std::endl;
+    cparse::TokenMap scriptMap;
     CDataStream ss(vdata, SER_NETWORK, PROTOCOL_VERSION);
 
-    std::string::iterator ic = opretDesc.begin();
+    std::string::const_iterator ic = desc.begin();
 
-    std::function<void(cparse::TokenMap&, std::string::iterator &)> UnserializeOpreturn = [&](cparse::TokenMap &tmap, std::string::iterator &ic)
+    std::function<void(cparse::TokenMap&, std::string::const_iterator &)> UnserializeScript = [&](cparse::TokenMap &tmap, std::string::const_iterator &ic)
     {
-        while(ic != opretDesc.end() && isspace(*ic)) ++ic;
-        if (ic == opretDesc.end())  
-            throw std::ios_base::failure("UnserializeOpreturn(): unexpected eof in opreturn description");
+        while(ic != desc.end() && isspace(*ic)) ++ic;
+        if (ic == desc.end())  
+            throw std::ios_base::failure("UnserializeScript(): unexpected eof in script description");
         if (*ic != '{') 
-            throw std::ios_base::failure("UnserializeOpreturn(): expected '{' in opreturn description"); 
+            throw std::ios_base::failure("UnserializeScript(): expected '{' in script description"); 
         ++ ic;
 
         while(true) {
-            while(ic != opretDesc.end() && isspace(*ic)) ++ic;
-            if (ic == opretDesc.end())  
-                throw std::ios_base::failure("UnserializeOpreturn(): unexpected eof in opreturn description");
+            while(ic != desc.end() && isspace(*ic)) ++ic;
+            if (ic == desc.end())  
+                throw std::ios_base::failure("UnserializeScript(): unexpected eof in script description");
 
             std::string fieldName;
-            while (ic != opretDesc.end() && isalnum(*ic))  {
+            while (ic != desc.end() && isalnum(*ic))  {
                 fieldName += *ic;
                 ++ ic;
             }
-            if (ic == opretDesc.end())  
-                throw std::ios_base::failure("UnserializeOpreturn(): unexpected eof in opreturn description");
+            if (ic == desc.end())  
+                throw std::ios_base::failure("UnserializeScript(): unexpected eof in script description");
             if (fieldName.empty())  
-                throw std::ios_base::failure("UnserializeOpreturn(): field name empty in opreturn description");
-            while(ic != opretDesc.end() && isspace(*ic)) ++ic;
+                throw std::ios_base::failure("UnserializeScript(): field name empty in script description");
+            while(ic != desc.end() && isspace(*ic)) ++ic;
             if (*ic != ':') 
-                throw std::ios_base::failure("UnserializeOpreturn(): expected ':' in opreturn description");
+                throw std::ios_base::failure("UnserializeScript(): expected ':' in script description");
             ++ ic;
-            while(ic != opretDesc.end() && isspace(*ic)) ++ic;
-            if (ic == opretDesc.end())  
-                throw std::ios_base::failure("UnserializeOpreturn(): unexpected eof in opreturn description");
+            while(ic != desc.end() && isspace(*ic)) ++ic;
+            if (ic == desc.end())  
+                throw std::ios_base::failure("UnserializeScript(): unexpected eof in script description");
 
             if (*ic == 'C')  {
                 char c;
@@ -253,71 +267,264 @@ cparse::packToken decode_opreturn(cparse::TokenMap scope)
             } else if (*ic == 'A')  {
                 cparse::TokenList listMaps;
                 ++ ic;
-                while(ic != opretDesc.end() && isspace(*ic)) ++ic;
-                if (ic == opretDesc.end())  
-                    throw std::ios_base::failure("UnserializeOpreturn(): unexpected eof in opreturn description");
+                while(ic != desc.end() && isspace(*ic)) ++ic;
+                if (ic == desc.end())  
+                    throw std::ios_base::failure("UnserializeScript(): unexpected eof in script description");
                 uint64_t asize = ReadCompactSize(ss);
-                std::string::iterator ic_saved = ic;
+                std::string::const_iterator ic_saved = ic;
                 for(int i = 0; i < (int)asize; i ++)
                 {
                     cparse::TokenMap nestedMap;
                     ic = ic_saved;  // reset point to arra descitption to use it for next element
-                    UnserializeOpreturn(nestedMap, ic);
+                    UnserializeScript(nestedMap, ic);
                     listMaps.push(nestedMap);
                 }
                 tmap[fieldName] = listMaps;
             }
             else {
-                throw std::ios_base::failure("UnserializeOpreturn(): unknown type in opreturn description");
+                throw std::ios_base::failure("UnserializeScript(): unknown type in script description");
             }
             //++ ic;
-            //std::cerr << __func__ << " ic=" << std::string(ic, opretDesc.end()) << std::endl;
-            while(ic != opretDesc.end() && isspace(*ic)) ++ic;
-            if (ic == opretDesc.end())  
-                throw std::ios_base::failure("UnserializeOpreturn(): unexpected eof in opreturn description");    
+            //std::cerr << __func__ << " ic=" << std::string(ic, desc.end()) << std::endl;
+            while(ic != desc.end() && isspace(*ic)) ++ic;
+            if (ic == desc.end())  
+                throw std::ios_base::failure("UnserializeScript(): unexpected eof in script description");    
             if (*ic == '}') 
                 break;    
             if (*ic != ',') 
-                throw std::ios_base::failure("UnserializeOpreturn(): expected ',' in opreturn description");    
+                throw std::ios_base::failure("UnserializeScript(): expected ',' in script description");    
             ++ ic;         
         }
         ++ ic; 
-        while(ic != opretDesc.end() && isspace(*ic)) ++ ic;
+        while(ic != desc.end() && isspace(*ic)) ++ ic;
     };
 
     try   
     {
-        UnserializeOpreturn(opretMap, ic);
-
-        print_map(opretMap);
+        UnserializeScript(scriptMap, ic);
+        print_map(scriptMap);
     }
     catch (std::ios_base::failure e)   {
-        std::cerr << __func__ << " opreturn decode error: " << e.what() << std::endl;
+        std::cerr << __func__ << " script decode error: " << e.what() << std::endl;
         return cparse::packToken();
     }
     catch (std::exception e)   {
-        std::cerr << __func__ << " opreturn decode error: " << e.what() << std::endl;
+        std::cerr << __func__ << " script decode error: " << e.what() << std::endl;
         return cparse::packToken();
     }
 
-    if (ic != opretDesc.end())  {
-        std::cerr << __func__ << " unexpected symbol in opreturn description: " << *ic << std::endl;
+    if (ic != desc.end())  {
+        std::cerr << __func__ << " unexpected symbol in script description: " << *ic << std::endl;
         return cparse::packToken();
     }
     if (!ss.eof())  {
-        std::cerr << __func__ << " opreturn data left, in_avail()= " << ss.in_avail() << std::endl;
+        std::cerr << __func__ << " script data left, in_avail()= " << ss.in_avail() << std::endl;
         return cparse::packToken();
     }
-    return opretMap;
+    return scriptMap;
 }
 
+cparse::packToken decode_OpReturn(cparse::TokenMap scope)
+{
+    //std::cerr << __func__ << " entered..." << std::endl;
+
+    cparse::TokenMap txMap = scope["txMap"].asMap();
+    std::string desc = scope["desc"].asString();
+    cparse::TokenList vouts = txMap["vout"].asList();
+    if (vouts.list().size() == 0)  {
+        std::cerr << __func__ << " opreturn parse error: no vouts" << std::endl;
+        return cparse::packToken();
+    }
+
+    cparse::TokenMap spkMap = vouts.list().back().asMap()["scriptPubKey"].asMap();
+    vuint8_t vspk = ParseHex(spkMap["data"].asString());
+    CScript spk(vspk.begin(), vspk.end());
+    std::cerr << __func__ << " vouts.list()=" << vouts.list().size() << " desc=" << desc << std::endl;
+    //std::cerr << __func__ << " spk.size()=" << spk.size() << " spk.data=" << spkMap["data"].asString() << std::endl;
+
+    vuint8_t vdata;
+    if (!GetOpReturnData(spk, vdata))   {
+        std::cerr << __func__ << " opreturn parse error: last vout not opreturn" << std::endl;
+        return cparse::packToken();
+    }
+    return decode_script(vdata, desc);  
+}
+
+cparse::packToken decode_ScriptSig(cparse::TokenMap scope)
+{
+    //std::cerr << __func__ << " entered..." << std::endl;
+
+    cparse::TokenMap scriptSigMap = scope["scriptSig"].asMap();
+    //CScript *pscriptSig = reinterpret_cast<CScript*>( scriptSigMap[PTR_SCRIPTSIG].asInt() );
+    vuint8_t vsig = ParseHex(scriptSigMap["data"].asString());
+    CScript scriptSig(vsig.begin(), vsig.end());
+    std::string desc = scope["desc"].asString();    
+    std::cerr << __func__ << " vsig.size()=" << scriptSig.size() << " data=" << scriptSigMap["data"].asString() << std::endl;
+
+
+    vuint8_t vdata;
+    GetPushData(scriptSig, vdata);
+    return decode_script(vdata, desc);  
+}
+
+bool Getscriptaddress(char *destaddr,const CScript &scriptPubKey);
+
+cparse::packToken get_tx_outputs_for_scriptPubKey(cparse::TokenMap scope)
+{
+    std::cerr << __func__ << " entered..." << std::endl;
+
+    cparse::TokenMap txMap = scope["txMap"].asMap();
+    cparse::TokenList vouts = txMap["vout"].asList();
+    if (vouts.list().size() == 0)  {
+        std::cerr << __func__ << "no vouts" << std::endl;
+        return 0;
+    }
+    CScript checkspk(ParseHex(scope["spk"].asMap()["data"].asString()));
+    //char checkaddr[64];
+    //Getscriptaddress(checkaddr, checkspk);
+
+    CAmount outputs = 0L;
+    for (auto const & v : vouts.list()) {
+        CScript spk(ParseHex(v.asMap()["scriptPubKey"].asMap()["data"].asString())); 
+        //char voutaddr[64];
+        //Getscriptaddress(voutaddr, spk);  
+        //std::cerr << __func__ << " checkaddr=" << checkaddr << " voutaddr=" << voutaddr << std::endl;      
+        //if (std::string(checkaddr) == std::string(voutaddr)) {
+        if (checkspk == spk)  {
+            outputs += v.asMap()["nValue"].asInt();
+            std::cerr << __func__ << " adding output=" << v.asMap()["nValue"].asInt() << std::endl;
+        }
+    }
+    std::cerr << __func__ << " outputs=" << outputs << std::endl;
+    return outputs;  
+}
+
+cparse::packToken my_str_cmp(cparse::TokenMap scope)
+{
+    std::cerr << __func__ << " entered..." << std::endl;
+
+    std::string str1 = scope["str1"].asString();
+    std::string str2 = scope["str2"].asString();
+
+    int res = str1.compare(str2);  
+    std::cerr << __func__ << " result=" << res << std::endl;
+    return res;
+}
+
+
+cparse::packToken is_vin_signed_with_pubkey(cparse::TokenMap scope)
+{
+    std::cerr << __func__ << " entered..." << std::endl;
+
+    //std::cerr << __func__ << " scope[\"txMap\"]" << scope["txMap"].asString() << std::endl;
+    cparse::TokenMap txMap = scope["txMap"].asMap();
+    uint32_t ivin = scope["ivin"].asInt();
+    vuint8_t vpubkey = ParseHex(scope["pubkey"].asString());
+    vuint8_t txdata = ParseHex(txMap["data"].asString());
+
+    //std::cerr << __func__ << " vpubkey=" << HexStr(vpubkey) << std::endl;
+    CMutableTransaction mtx; 
+    CTransactionRef pvintx;
+    uint256 hashBlock;
+    E_UNMARSHAL(txdata, ss >> mtx);
+    CTransaction tx(mtx);
+    //std::cerr << __func__ << " unmarshaled tx=" << HexStr(E_MARSHAL(ss << tx)) << std::endl;
+    if (ivin < tx.vin.size() &&
+        GetTransaction(tx.vin[ivin].prevout.hash, pvintx, Params().GetConsensus(), hashBlock, true))  {
+        PrecomputedTransactionData txdata(tx);
+        auto checker = ServerTransactionSignatureChecker(&tx, ivin, pvintx->vout[tx.vin[ivin].prevout.n].nValue, false, txdata);
+        const CScript &scriptSig = tx.vin[ivin].scriptSig;
+        auto pc = scriptSig.begin();
+        opcodetype opcode;
+        vuint8_t vsig;
+
+        //std::cerr << __func__ << " scriptSig=" << HexStr(vuint8_t(scriptSig.data(), scriptSig.data()+scriptSig.size())) << std::endl;
+        while(scriptSig.GetOp(pc, opcode, vsig)) {
+            //std::cerr << __func__ << " opcode=" << (int)opcode << " vsig=" << HexStr(vsig) << std::endl;
+            if (!vsig.empty())  {
+                bool result = checker.CheckSig(vsig, vpubkey, pvintx->vout[tx.vin[ivin].prevout.n].scriptPubKey, SigVersion::BASE); // which sigversion?
+                std::cerr << __func__ << " checker.CheckSig=" << result << std::endl;
+                if (result)
+                    return result;
+            }
+        }
+    }
+    std::cerr << __func__ << " exits with false" << std::endl;
+    return false;
+}
+
+
+// normalise uint256 to the 0...norm values
+cparse::packToken normalize_uint256(cparse::TokenMap scope)
+{
+    std::cerr << __func__ << " entered..." << std::endl;
+
+    std::string u256hex = scope["u256hex"].asString();
+    uint256 u256value;
+    u256value.SetHex(u256hex);
+    int32_t norm = scope["norm"].asInt();
+
+    mpz_t mpzValue;
+    mpz_t mpzMax;
+    mpz_t mpzResult;
+
+
+    mpz_init(mpzValue);
+    mpz_init(mpzMax);
+    mpz_init(mpzResult);
+
+    mpz_import(mpzValue, 1, 1, sizeof(u256value), 0, 0, &u256value);
+    mpz_set_ui(mpzMax, 1);
+    mpz_ui_pow_ui(mpzMax, 2, sizeof(u256value)*8); // get 0x10...00 (256) val
+    mpz_mul_si(mpzResult, mpzValue, norm);
+    mpz_div(mpzResult, mpzResult, mpzMax);
+
+    int32_t iResult = mpz_get_si(mpzResult);
+
+    mpz_clear(mpzValue);
+    mpz_clear(mpzMax);
+    mpz_clear(mpzResult);
+
+    std::cerr << __func__ << " exits normalised value=" << iResult << std::endl;
+    return iResult;
+}
+
+cparse::packToken print_to_stderr(cparse::TokenMap scope)
+{
+    cparse::packToken name = scope["name"];
+    cparse::packToken val = scope["value"];
+
+    std::cerr << __func__ << " type=" << (int)val->type << " ";
+    if (name->type == cparse::STR)
+        std::cerr << name.asString() << " ";
+
+    if (val->type == cparse::STR)
+        std::cerr << val.asString();
+    else if (val->type == cparse::INT)
+        std::cerr << val.asInt();
+    else if (val->type == cparse::BOOL)
+        std::cerr << val.asBool();
+    else if (val->type == cparse::REAL)
+        std::cerr << val.asDouble();
+    std::cerr << std::endl;
+    return cparse::packToken();
+}
 
 void CRuleProc::init()
 {
     std::cerr << "CRuleProc::init enterred" << std::endl;
     scope[CHAIN_ACTIVE] = get_active_chain();  // cparse::CppFunction(&get_active_chain, {}, "");
     scope["GetTransaction"] = cparse::CppFunction(&get_transaction, {"hash"}, "");
-    scope["DecodeOpReturn"] = cparse::CppFunction(&decode_opreturn, {"txMap", "opreturnDesc"}, "");
+    scope["DecodeOpReturn"] = cparse::CppFunction(&decode_OpReturn, {"txMap", "desc"}, "");
+    scope["DecodeScriptSig"] = cparse::CppFunction(&decode_ScriptSig, {"scriptSig", "desc"}, "");
+    scope["OutputsForScriptPubKey"] = cparse::CppFunction(&get_tx_outputs_for_scriptPubKey, {"txMap", "spk"}, "");
+    scope["StrCmp"] = cparse::CppFunction(&my_str_cmp, {"str1", "str2"}, "");
+
+    scope["Sha256"] = cparse::CppFunction(&sha256_for_hexstr, {"hex"}, "");
+    scope["IsSigner"] = cparse::CppFunction(&is_vin_signed_with_pubkey, {"txMap", "ivin", "pubkey"}, "");
+    scope["Norm256"] = cparse::CppFunction(&normalize_uint256, {"u256hex", "norm"}, "");
+    scope["Print"] = cparse::CppFunction(&print_to_stderr, {"name", "value"}, "");
+
 
 
     //BASE_chain["height"] = cparse::CppFunction(&get_chain_height);
@@ -358,11 +565,13 @@ int CRuleProc::compile(const std::string &expr, std::string &error)
     return RULE_OKAY;
 }
 
-int CRuleProc::eval(const std::string &expr, const CTransaction &tx, std::string &error)
+int CRuleProc::eval(const std::string &expr, const CTransaction &tx, int32_t nIn, std::string &error)
 {
     ruleparser::RuleStatement ruleParser;
 
     scope[EVAL_TX] = get_transaction_as_TokenMap(tx); // convert eval tx into map and put it into rule scope
+    scope[I_VIN] = nIn; // convert eval tx into map and put it into rule scope
+
     int result = RULE_INVALID;
 
     std::cerr << "CRuleProc::eval txrule expression=" << expr << std::endl;
@@ -409,8 +618,8 @@ void test_decode_opret(const CTransaction &tx, std::string desc)
     cparse::TokenMap inputScope;
 
     inputScope["txMap"] = get_transaction_as_TokenMap(tx);
-    inputScope["opreturnDesc"] = desc;
-    cparse::TokenMap parsed = decode_opreturn(inputScope).asMap();
+    inputScope["desc"] = desc;
+    cparse::TokenMap parsed = decode_OpReturn(inputScope).asMap();
 
     try {
         std::cerr << __func__ << " parsed map:" << std::endl;
