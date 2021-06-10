@@ -4431,10 +4431,10 @@ UniValue diceclaim(const JSONRPCRequest& request)
     if (!GetTransaction(txidbet, txbet, Params().GetConsensus(), hashBlock2, false) || hashBlock2.IsNull())
         throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Cant load bet tx (maybe in mempool)");
 
-    if (vouthouse < 0 || vouthouse >= txhouse->vout.size())
+    if (vouthouse >= txhouse->vout.size())
         throw JSONRPCError(RPC_INVALID_PARAMETER, "house utxo vout invalid");
 
-    if (voutbet < 0 || voutbet >= txbet->vout.size())
+    if (voutbet >= txbet->vout.size())
         throw JSONRPCError(RPC_INVALID_PARAMETER, "bet utxo vout invalid");
 
     int32_t win, loss;
