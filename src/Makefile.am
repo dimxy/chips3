@@ -525,6 +525,7 @@ clean-local:
 	-rm -f leveldb/*/*.gcda leveldb/*/*.gcno leveldb/helpers/memenv/*.gcda leveldb/helpers/memenv/*.gcno
 	-rm -f config.h
 	-rm -rf test/__pycache__
+	-$(MAKE) -C script_expr/cparse clean
 
 .rc.o:
 	@test -f $(WINDRES)
