@@ -57,7 +57,7 @@ public:
     }
 };
 
-static auto noop = [&](CMutableTransaction &mtx){};
+static auto noop = [](CMutableTransaction &mtx){};
 
 
 template<typename Modifier>
