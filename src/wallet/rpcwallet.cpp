@@ -668,7 +668,7 @@ UniValue sendtoaddresswithrule(const JSONRPCRequest& request)
             CDataStream ss(SER_NETWORK, PROTOCOL_VERSION);
             std::function<void(UniValue arr)> ser = [&](UniValue arr) {
                 std::cerr << __func__ << " arr.isArray()=" << arr.isArray() << " arr.size()="<< arr.size() << std::endl; 
-                for (int i = 0; i < arr.size(); i ++)  {
+                for (size_t i = 0; i < arr.size(); i ++)  {
                     if (arr[i].isArray())  {
                         uint64_t asize = arr[i].size();
                         WriteCompactSize(ss, asize);
