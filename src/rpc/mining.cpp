@@ -137,6 +137,7 @@ UniValue generateBlocks(std::shared_ptr<CReserveScript> coinbaseScript, int nGen
             --nMaxTries;
         }
         if (nMaxTries == 0) {
+            std::cerr << __func__ << " nMaxTries reached" << std::endl;
             break;
         }
         if (pblock->nNonce == nInnerLoopCount) {

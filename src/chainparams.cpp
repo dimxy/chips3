@@ -291,7 +291,7 @@ public:
         consensus.BIP66Height = 330776; // 000000002104c8c45e99a8853285a3b592602a3ccde2b832481da85e9e4ba182
         //consensus.powLimit = uint256S("00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         //consensus.powLimit = uint256S("0000007fffff0000000000000000000000000000000000000000000000000000");
-        consensus.powLimit = uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
+        consensus.powLimit =   uint256S("7fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff");
         consensus.nPowTargetTimespan = 14 * 24 * 60 * 60; // two weeks
         consensus.nPowTargetSpacing = 10 * 60;
         consensus.fPowAllowMinDifficultyBlocks = true;
@@ -337,7 +337,7 @@ public:
         {
             genesis = CreateGenesisBlock(1500000777, nonce, 0x1e007fff, 1, 50 * COIN);
             consensus.hashGenesisBlock = genesis.GetHash();
-            if ( ptr[31] == 0 && ptr[30] == 0 && ptr[29] == 0 && (ptr[28] & 0x80) == 0)
+            if ( ptr[31] == 0 /*&& ptr[30] == 0 && ptr[29] == 0 && (ptr[28] & 0x80) == 0*/)
                 break;
             if ( (nonce % 1000000) == 999999 )
                 fprintf(stderr,"%d ",nonce);
@@ -353,8 +353,8 @@ public:
 
         //assert(consensus.hashGenesisBlock == uint256S("0x000000000933ea01ad0ee984209779baaec3ced90fa3f408719526f8d77f4943"));
         //assert(genesis.hashMerkleRoot == uint256S("0x4a5e1e4baab89f3a32518a88c31bc87f618f76673e2cc77ab2127b7afdeda33b"));
-        assert(consensus.hashGenesisBlock == uint256S("0x0000006e75f6aa0efdbf7db03132aa4e4d0c84951537a6f5a7c39a0a9d30e1e7"));
-        assert(genesis.hashMerkleRoot == uint256S("0x9bd1c477af8993947cdd9052c0e4c287fda95987b3cc8934b3769d7503852715"));
+        //assert(consensus.hashGenesisBlock == uint256S("0x0000006e75f6aa0efdbf7db03132aa4e4d0c84951537a6f5a7c39a0a9d30e1e7"));
+        //assert(genesis.hashMerkleRoot == uint256S("0x9bd1c477af8993947cdd9052c0e4c287fda95987b3cc8934b3769d7503852715"));
 
 
 
