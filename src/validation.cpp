@@ -3031,7 +3031,7 @@ static bool CheckBlockHeader(const CBlockHeader& block, CValidationState& state,
 
     if ( chainActive.Height() > consensusParams.nAdaptivePoWActivationThreshold )
     {
-        if (block.GetBlockTime() > GetAdjustedTime() + 4 /*&& ChainNameFromCommandLine() != CBaseChainParams::REGTEST*/)
+        if (block.GetBlockTime() > GetAdjustedTime() + 4 && ChainNameFromCommandLine() == CBaseChainParams::MAIN)  // allow flex timing for testnets
         {
             // LogPrintf("CheckBlockHeader block from future %d error",block.GetBlockTime() - GetAdjustedTime());
             return state.DoS(50, false, REJECT_INVALID, "block-from-future", false, "CheckBlockHeader block from future");
