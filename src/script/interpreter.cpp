@@ -1580,14 +1580,14 @@ bool VerifyScript(const CScript& scriptSig, const CScript& scriptPubKey, const C
     }
     else if (!EvalScript(stack, scriptSig, flags, checker, SigVersion::BASE, serror)) {
         // serror is set
-        std::cerr << __func__ << " EvalScript failed error=" << ScriptErrorString(*serror) << std::endl;
+        std::cerr << __func__ << " EvalScript failed error=" << (serror ? ScriptErrorString(*serror) : "null") << std::endl;
         return false;
     }
     if (flags & SCRIPT_VERIFY_P2SH)
         stackCopy = stack;
     if (!EvalScript(stack, scriptPubKey, flags, checker, SigVersion::BASE, serror)) {
         // serror is set
-        std::cerr << __func__ << " EvalScript failed error=" << ScriptErrorString(*serror) << std::endl;
+        std::cerr << __func__ << " EvalScript failed error=" << (serror ? ScriptErrorString(*serror) : "null") << std::endl;
         return false;
     }
     if (stack.empty())
