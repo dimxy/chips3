@@ -300,6 +300,8 @@ public:
         consensus.nMinerConfirmationWindow = 2016; // nPowTargetTimespan / nPowTargetSpacing
         consensus.nPowAveragingWindow = 1;  // prevent div by zero (dimxy)
 
+        consensus.nAdaptivePoWActivationThreshold = 10000000; // do not allow adaptive pow to make testnet blocks fast
+
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].bit = 28;
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nStartTime = 1199145601; // January 1, 2008
         consensus.vDeployments[Consensus::DEPLOYMENT_TESTDUMMY].nTimeout = 1230767999; // December 31, 2008
