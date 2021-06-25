@@ -4426,10 +4426,10 @@ UniValue diceclaim(const JSONRPCRequest& request)
 
     uint256 hashBlock1, hashBlock2;
     CTransactionRef txhouse, txbet;
-    if (!GetTransaction(txidhouse, txhouse, Params().GetConsensus(), hashBlock1, false) || hashBlock1.IsNull())
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Cant load house tx (maybe in mempool)");
-    if (!GetTransaction(txidbet, txbet, Params().GetConsensus(), hashBlock2, false) || hashBlock2.IsNull())
-        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Cant load bet tx (maybe in mempool)");
+    if (!GetTransaction(txidhouse, txhouse, Params().GetConsensus(), hashBlock1, false) /*|| hashBlock1.IsNull()*/)
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Cant load house tx" /*"(maybe in mempool)"*/);
+    if (!GetTransaction(txidbet, txbet, Params().GetConsensus(), hashBlock2, false) /*|| hashBlock2.IsNull()*/)
+        throw JSONRPCError(RPC_INVALID_ADDRESS_OR_KEY, "Cant load bet tx" /*"(maybe in mempool)"*/);
 
     if (vouthouse >= txhouse->vout.size())
         throw JSONRPCError(RPC_INVALID_PARAMETER, "house utxo vout invalid");
