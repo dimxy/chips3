@@ -4184,7 +4184,7 @@ UniValue dicefund(const JSONRPCRequest& request)
 
     bool fSubtractFeeFromAmount = false;
     CCoinControl coin_control;
-    int64_t nLockTime = GetAdjustedTime() + 240; // lock for 4 min
+    int64_t nLockTime = GetAdjustedTime() + 300; // lock for 5 min
 
     // spk script to spend house funds:
     std::string ruleExpr = 
@@ -4209,7 +4209,7 @@ UniValue dicefund(const JSONRPCRequest& request)
     "  AND { \n"
     //   house wins - takes all his funds back:
     "    Sha256(opretClaim.entropyHouse) == \"" + hentropyHex + "\"\n"
-    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * win100 < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * loss100 \n"
     "    IsSigner(evaltx, ivin, \"" + mypkHex + "\") \n"  // signed by house
     "  } \n" 
     "  AND { \n"
@@ -4278,7 +4278,7 @@ UniValue dicebet(const JSONRPCRequest& request)
 
     bool fSubtractFeeFromAmount = false;
     CCoinControl coin_control;
-    int nLockTime = GetAdjustedTime() + 240; // lock for 4 min
+    int nLockTime = GetAdjustedTime() + 300; // lock for 5 min
 
     // spk script to spend bettor funds:
     std::string ruleExpr = 
@@ -4292,7 +4292,7 @@ UniValue dicebet(const JSONRPCRequest& request)
     // bettor wins - takes all his funds back:
     "  AND { \n"
     "    Sha256(opretClaim.entropyBet) == \"" + hentropyHex + "\"\n"  
-    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * win100 > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * loss100 \n"
     "    IsSigner(evaltx, ivin, \"" + mypkHex + "\") \n" // signed by bettor
     "  } \n" 
     "  AND { \n"
