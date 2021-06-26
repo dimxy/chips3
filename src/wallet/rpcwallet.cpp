@@ -4193,13 +4193,14 @@ UniValue dicefund(const JSONRPCRequest& request)
     "  bettx = GetTransaction(evaltx.vin[1].hash) \n"
     "  opretClaim = DecodeOpReturn(evaltx, \"{entropyHouse:H,entropyBet:H}\") \n"
     "  opretBet = DecodeOpReturn(bettx, \"{win:I,loss:I}\") \n"  // bettx opreturn
-    "  adjLoss = opretBet.loss + int(opretBet.loss / (opretBet.loss + opretBet.win) * 2 / 100) \n" // adjusted loss chances for house advantage of 0,02
-    // bettor wins - takes house's funds in loss/win ratio:
+    "  win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) - 1 \n"  // normalise and adjust wins for house advantage (2%)
+    "  loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) + 1 \n"  // normalise and adjust loss for house advantage (2%)    // bettor wins - takes house's funds in loss/win ratio:
     "  AND { \n"
+    // bettor wins - takes house's funds in loss/win ratio:
     "    houseFunds = housetx.vout[evaltx.vin[0].n].nValue  \n"  // original house funds
     "    houseBack = OutputsForScriptPubKey(evaltx, housetx.vout[evaltx.vin[0].n].scriptPubKey) \n"  // returned back house funds
     "    Sha256(opretClaim.entropyHouse) == \"" + hentropyHex + "\"\n"  
-    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * win100 > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * loss100 \n"
     "    Print(\"(houseFunds - houseBack) * opretBet.win=\", int((houseFunds - houseBack) * opretBet.win)) \n"
     "    Print(\"(houseFunds * opretBet.loss=\", int(houseFunds * opretBet.loss)) \n"
     "    int((houseFunds - houseBack) * opretBet.win) <= int(houseFunds * opretBet.loss) \n"  // bettor's/house's <= loss/win
@@ -4286,7 +4287,8 @@ UniValue dicebet(const JSONRPCRequest& request)
     "  bettx = GetTransaction(evaltx.vin[1].hash) \n"
     "  opretClaim = DecodeOpReturn(evaltx, \"{entropyHouse:H,entropyBet:H}\") \n"
     "  opretBet = DecodeOpReturn(bettx, \"{win:I,loss:I}\") \n"  // bettx opreturn
-    "  adjLoss = opretBet.loss + int(opretBet.loss / (opretBet.loss + opretBet.win) * 2 / 100) \n" // adjusted loss for house advantage of 0,02
+    "  win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) - 1 \n"  // normalise and adjust wins for house advantage (2%)
+    "  loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) + 1 \n"  // normalise and adjust loss for house advantage (2%)
     // bettor wins - takes all his funds back:
     "  AND { \n"
     "    Sha256(opretClaim.entropyBet) == \"" + hentropyHex + "\"\n"  
@@ -4298,7 +4300,7 @@ UniValue dicebet(const JSONRPCRequest& request)
     "    bettorFunds = bettx.vout[evaltx.vin[1].n].nValue \n"  // original bettor funds
     "    bettorBack = OutputsForScriptPubKey(evaltx, bettx.vout[evaltx.vin[1].n].scriptPubKey) \n"  // returned back bettor funds
     "    Sha256(opretClaim.entropyBet) == \"" + hentropyHex + "\"\n"
-    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * opretBet.win < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * adjLoss \n"
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * win100 < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * loss100 \n"
     "    Print(\"(bettorFunds - bettorBack) * opretBet.loss=\", int((bettorFunds - bettorBack) * opretBet.loss)) \n"
     "    Print(\"(bettorFunds * opretBet.win=\", int(bettorFunds * opretBet.win)) \n"
     "    int((bettorFunds - bettorBack) * opretBet.loss) <= int(bettorFunds * opretBet.win) \n"  // house's/bettor's <= win/loss
