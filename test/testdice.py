@@ -75,7 +75,7 @@ def run_dice() :
             output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
-            print("claimed from house:", txjson['vout'][0]['value'], "claimed from bettor:", txjson['vout'][1]['value'])
+            print("claimed from house (-txfee):", txjson['vout'][0]['value'], "claimed from bettor:", txjson['vout'][1]['value'])
 
     except Exception as e :
         print("diceclaim as house error:", e)
@@ -92,7 +92,7 @@ def run_dice() :
             output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
-            print("claimed from bettor:", txjson['vout'][0]['value'], "claimed from house:", txjson['vout'][1]['value'])
+            print("claimed from bettor:", txjson['vout'][0]['value'], "claimed from house (-txfee):", txjson['vout'][1]['value'])
 
     except Exception as e :
         print("diceclaim as bettor error:", e)         
