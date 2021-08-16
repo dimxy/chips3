@@ -31,9 +31,9 @@ def run_dice() :
     bettor_ent = hex(random.randint(1, 0x7fff_ffff))[2:].zfill(64)    
     print("house_ent=", house_ent)
     print("bettor_ent=", bettor_ent)
-    output = go([basecmd, "-regtest", "dicehentropy", house_ent])
+    output = go([basecmd, "-testnet", "dicehentropy", house_ent])
     house_hash = output.decode("utf-8").strip()
-    output = go([basecmd, "-regtest", "dicehentropy", bettor_ent])
+    output = go([basecmd, "-testnet", "dicehentropy", bettor_ent])
     bettor_hash = output.decode("utf-8").strip()
     print("house_hash=", house_hash)
     print("bettor_hash=", bettor_hash)
@@ -45,13 +45,13 @@ def run_dice() :
     fundparam["changePosition"] = 0
 
     print("creating bet proposal, amount:", bettor_amount, "odds:", odds)
-    output = go([basecmd, "-regtest", "dicecreatebettxproposal", bettor_pk, house_pk, bettor_amount, odds, bettor_hash])
+    output = go([basecmd, "-testnet", "dicecreatebettxproposal", bettor_pk, house_pk, bettor_amount, odds, bettor_hash])
     bettx = output.decode("utf-8").strip()
     assert(bettx.find("error") < 0)
     print("dicecreatebettxproposal created")
 
     '''
-    output = go([basecmd, "-regtest", "fundrawtransaction", bettx, json.dumps(fundparam)])
+    output = go([basecmd, "-testnet", "fundrawtransaction", bettx, json.dumps(fundparam)])
     outputdecoded = output.decode("utf-8").strip()
     bettxfunded = json.loads(outputdecoded)
     assert(bettxfunded['hex'])
@@ -59,33 +59,33 @@ def run_dice() :
     '''
 
     print("accepting bet proposal")
-    output = go([basecmd, "-regtest", "diceacceptbettxproposal", house_pk, bettx, house_hash])
+    output = go([basecmd, "-testnet", "diceacceptbettxproposal", house_pk, bettx, house_hash])
     bettxaccepted = output.decode("utf-8").strip()
     assert(bettxaccepted.find("error") < 0)
     print("diceacceptbettxproposal created")
 
     '''
-    output = go([basecmd, "-regtest", "fundrawtransaction", bettxaccepted, json.dumps(fundparam)])
+    output = go([basecmd, "-testnet", "fundrawtransaction", bettxaccepted, json.dumps(fundparam)])
     outputdecoded = output.decode("utf-8").strip()
     bettxacceptedfunded = json.loads(outputdecoded)
     assert(bettxacceptedfunded["hex"])
     print("fundrawtransaction funded for house")
     '''
 
-    output = go([basecmd, "-regtest", "signrawtransactionwithwallet", bettxaccepted])
+    output = go([basecmd, "-testnet", "signrawtransactionwithwallet", bettxaccepted])
     outputdecoded = output.decode("utf-8").strip()
     bettxsigned = json.loads(outputdecoded)
     print("bettxsigned=", bettxsigned)
     assert(bettxsigned["complete"])
 
-    output = go([basecmd, "-regtest", "sendrawtransaction", bettxsigned['hex']])
+    output = go([basecmd, "-testnet", "sendrawtransaction", bettxsigned['hex']])
     bettxid = output.decode("utf-8").strip()
     assert(bettxid.find("error") < 0) # no error found
 
-    go([basecmd, "-regtest", "generate", "1", "100000000"])  
+    go([basecmd, "-testnet", "generate", "1", "100000000"])  
 
     # find vout with funds
-    output = go([basecmd, "-regtest", "getrawtransaction", bettxid, "true"])
+    output = go([basecmd, "-testnet", "getrawtransaction", bettxid, "true"])
     strjson = output.decode("utf-8").strip()
     txjson = json.loads(strjson)
     txbettor_vout = -1
@@ -104,12 +104,12 @@ def run_dice() :
         print("")
         print("trying to claim as house...")
         # try to claim as house
-        output = go([basecmd, "-regtest", "diceclaim2", house_pk, house_ent, bettor_ent, bettxid + ":" + str(txhouse_vout), bettxid + ":" + str(txbettor_vout)])
+        output = go([basecmd, "-testnet", "diceclaim2", house_pk, house_ent, bettor_ent, bettxid + ":" + str(txhouse_vout), bettxid + ":" + str(txbettor_vout)])
         claimres = output.decode("utf-8").strip()
         print("diceclaim as house result:", claimres)
         if len(claimres) == 64 :   # returned non error but txid
-            go([basecmd, "-regtest", "generate", "1", "100000000"])  
-            output = go([basecmd, "-regtest", "getrawtransaction", claimres, "true"])
+            go([basecmd, "-testnet", "generate", "1", "100000000"])  
+            output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
             print("claimed from house (-txfee):", txjson['vout'][0]['value'], "claimed from bettor:", txjson['vout'][1]['value'])
@@ -121,12 +121,12 @@ def run_dice() :
         print("")
         print("trying to claim as bettor...")
         # as bettor
-        output = go([basecmd, "-regtest", "diceclaim2", bettor_pk, house_ent, bettor_ent, bettxid + ":" + str(txhouse_vout), bettxid + ":" + str(txbettor_vout)])
+        output = go([basecmd, "-testnet", "diceclaim2", bettor_pk, house_ent, bettor_ent, bettxid + ":" + str(txhouse_vout), bettxid + ":" + str(txbettor_vout)])
         claimres = output.decode("utf-8").strip()
         print("diceclaim as bettor result:", claimres)
         if len(claimres) == 64 :   # returned non error but txid
-            go([basecmd, "-regtest", "generate", "1", "100000000"])  
-            output = go([basecmd, "-regtest", "getrawtransaction", claimres, "true"])
+            go([basecmd, "-testnet", "generate", "1", "100000000"])  
+            output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
             print("claimed from house (-txfee):", txjson['vout'][0]['value'], "claimed from bettor:", txjson['vout'][1]['value'])
