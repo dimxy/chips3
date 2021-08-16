@@ -24,9 +24,10 @@
 #define TX_BLOCKHASH            "block_hash"
 
 // scope exposed objects
-#define EVAL_TX                 "evaltx"
+#define EVAL_TX                 "_evalTx"
+#define SPENT_TX                "_spentTx"
 #define CHAIN_ACTIVE            "chainActive"
-#define I_VIN                   "ivin"
+#define N_IN                    "_nIn"
 
 
 const int RULE_ERROR = -1,

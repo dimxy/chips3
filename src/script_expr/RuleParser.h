@@ -36,6 +36,7 @@ public:
 
     // This will allow each statement to be copied:
     virtual Statement *clone() const = 0;
+    std::string stmtSource;
 };
 
 /* * * * * ExpStatement Class * * * * */
@@ -65,10 +66,14 @@ private:
 
 public:
     ExpStatement() {}
-    ExpStatement(const char *code, const char **rest = 0,
+    ExpStatement(const char *code, const char **rest = NULL,
                  TokenMap parent_scope = &TokenMap::empty)
     {
+        const char *myrest;
+        if (!rest)
+            rest = &myrest;
         _compile(code, rest, parent_scope);
+        stmtSource = std::string(code, (*rest)-1);
     }
     virtual Statement *clone() const
     {
@@ -200,7 +205,12 @@ protected:
         {
             // If it is parse it and return:
             Statement *stmt = it->second();
+            const char *myrest;
+            if (!source)
+                source = &myrest; // fill source to get the end of the statement
             stmt->compile(code + name.size(), source, scope);
+            stmtSource = std::string(code, (*source)-1); // skip ending '\n' or ';'
+
             return stmt;
         }
 
@@ -208,7 +218,7 @@ protected:
         return new ExpStatement(code, source, scope);
     }
 public:
-    BlockStatement() {}
+    BlockStatement() { stmtSource = "block"; }
 
     // Implement The Big 3, for safely copying:
     BlockStatement(const BlockStatement &other)
@@ -271,17 +281,17 @@ class RuleStatementAnd : public RuleStatementBase
     {
         std::cerr << "RuleStatementAnd::" << __func__ << " enterred" << std::endl;
         // Returned value:
-        bool result = true;
+        packToken result = true;
         for (const auto stmt : _blockstmt.list)
         {
             // In a more complete implementation, `rv` should
             // be checked for "return" or "throw" behaviors.
-            packToken rstmt = stmt->exec(scope);
+            packToken rv = stmt->exec(scope);
 
-            if (rstmt->type == cparse::BOOL) {
-                std::cerr << "RuleStatementAnd::" << __func__ << " stmt result=" << rstmt.asBool() << std::endl;
-                result = result && rstmt.asBool();
-                if (!result)
+            if (rv->type == cparse::BOOL) {
+                std::cerr << "RuleStatementAnd::" << __func__ << " stmt [" << stmt->stmtSource << "] result=" << rv << std::endl;
+                result = result.asBool() && rv.asBool();
+                if (!result.asBool())
                     break;
             }
         }
@@ -291,7 +301,7 @@ class RuleStatementAnd : public RuleStatementBase
 
 
 public:
-    RuleStatementAnd() {}
+    RuleStatementAnd() { stmtSource = "rule-and"; }
     RuleStatementAnd(const RuleStatementAnd &other)
     {
         _blockstmt = *static_cast<BlockStatement*>( other._blockstmt.clone() );
@@ -315,7 +325,7 @@ class RuleStatementOr : public RuleStatementBase
             // be checked for "return" or "throw" behaviors.
             rv = stmt->exec(scope);
             if (rv->type == cparse::BOOL) {
-                std::cerr << "RuleStatementOr::" << __func__ << " stmt result=" << rv << std::endl;
+                std::cerr << "RuleStatementOr::" << __func__ << " stmt [" << stmt->stmtSource << "] result=" << rv << std::endl;
                 if (rv.asBool())
                     break;
             }
@@ -325,7 +335,7 @@ class RuleStatementOr : public RuleStatementBase
     }
 
 public:
-    RuleStatementOr() {}
+    RuleStatementOr() { stmtSource = "rule-or"; }
     RuleStatementOr(const RuleStatementOr &other)
     {
         _blockstmt = *static_cast<BlockStatement*>( other._blockstmt.clone() );

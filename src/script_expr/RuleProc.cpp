@@ -544,7 +544,7 @@ int CRuleProc::compile(const std::string &expr, std::string &error)
 {
     ruleparser::RuleStatement ruleParser;
 
-    std::cerr << "CRuleProc::compile txrule expression=" << expr << std::endl;
+    //std::cerr << "CRuleProc::compile txrule expression=" << expr << std::endl;
 
     try {
         const char *rest;
@@ -570,11 +570,18 @@ int CRuleProc::eval(const std::string &expr, const CTransaction &tx, int32_t nIn
     ruleparser::RuleStatement ruleParser;
 
     scope[EVAL_TX] = get_transaction_as_TokenMap(tx); // convert eval tx into map and put it into rule scope
-    scope[I_VIN] = nIn; // convert eval tx into map and put it into rule scope
+    uint256 hashBlock;
+    CTransactionRef vintx;
+    if (!GetTransaction(tx.vin[nIn].prevout.hash, vintx, Params().GetConsensus(), hashBlock, true))  {
+        error = std::string("txrule parse error: could not get vintx");
+        return RULE_ERROR;
+    }
+    scope[SPENT_TX] = get_transaction_as_TokenMap(*vintx);
+    scope[N_IN] = nIn; // convert eval tx into map and put it into rule scope
 
     int result = RULE_INVALID;
 
-    std::cerr << "CRuleProc::eval txrule expression=" << expr << std::endl;
+    //std::cerr << "CRuleProc::eval txrule expression=" << expr << std::endl;
 
     try {
         const char *rest;

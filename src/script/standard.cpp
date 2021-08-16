@@ -41,7 +41,7 @@ const char* GetTxnOutputType(txnouttype t)
     return nullptr;
 }
 
-bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::vector<unsigned char> >& vSolutionsRet)
+bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::vector<unsigned char> >& vSolutionsRet, std::vector<std::vector<unsigned char> >* pvTxRuleScriptsRet)
 {
     // Templates
     static std::multimap<txnouttype, CScript> mTemplates;
@@ -65,6 +65,8 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
     }
 
     vSolutionsRet.clear();
+    if (pvTxRuleScriptsRet)
+        pvTxRuleScriptsRet->clear();
 
     // Shortcut for pay-to-script-hash, which are more constrained than the other types:
     // it is always OP_HASH160 20 [20 byte hash] OP_EQUAL
@@ -206,6 +208,8 @@ bool Solver(const CScript& scriptPubKey, txnouttype& typeRet, std::vector<std::v
             {
                 // skip. Maybe add to vSolutions?
                 //std::cerr << __func__ << " OP_TXRULE found" << std::endl;
+                if (pvTxRuleScriptsRet)
+                    pvTxRuleScriptsRet->push_back(vch1);
             }
             else if (opcode1 != opcode2 || vch1 != vch2)
             {
@@ -286,7 +290,7 @@ bool ExtractDestinations(const CScript& scriptPubKey, txnouttype& typeRet, std::
         return false;
     }
 
-    if (typeRet == TX_MULTISIG)
+    if (typeRet == TX_MULTISIG || typeRet == TX_MULTISIG_WITH_TXRULE)
     {
         nRequiredRet = vSolutions.front()[0];
         for (unsigned int i = 1; i < vSolutions.size()-1; i++)
