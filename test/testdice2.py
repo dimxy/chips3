@@ -27,8 +27,8 @@ def run_dice() :
     # house ent af9ed0f9aad3254ab7ea3ff20c4382556447c0d25008b978f023730190839166
     # house hash fd77176c9fa9c8b07efbe246bbbb33f5f088a08b4ee8094645ded1c85db3afa8
 
-    house_ent = hex(random.randint(1, 0x7fff_ffff))[2:].zfill(64)
-    bettor_ent = hex(random.randint(1, 0x7fff_ffff))[2:].zfill(64)    
+    house_ent = hex(random.randint(1, 0x7fffffff))[2:].zfill(64)
+    bettor_ent = hex(random.randint(1, 0x7fffffff))[2:].zfill(64)    
     print("house_ent=", house_ent)
     print("bettor_ent=", bettor_ent)
     output = go([basecmd, "-testnet", "dicehentropy", house_ent])
