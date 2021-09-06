@@ -28,6 +28,8 @@
 #define SPENT_TX                "_spentTx"
 #define CHAIN_ACTIVE            "chainActive"
 #define N_IN                    "_nIn"
+#define N_PREVOUT               "_nPrevOut"
+
 
 
 const int RULE_ERROR = -1,

@@ -576,8 +576,9 @@ int CRuleProc::eval(const std::string &expr, const CTransaction &tx, int32_t nIn
         error = std::string("txrule parse error: could not get vintx");
         return RULE_ERROR;
     }
-    scope[SPENT_TX] = get_transaction_as_TokenMap(*vintx);
-    scope[N_IN] = nIn; // convert eval tx into map and put it into rule scope
+    scope[SPENT_TX] = get_transaction_as_TokenMap(*vintx); // convert eval tx into map and put it into rule scope
+    scope[N_IN] = nIn; 
+    scope[N_PREVOUT] = (int32_t)tx.vin[nIn].prevout.n; 
 
     int result = RULE_INVALID;
 
