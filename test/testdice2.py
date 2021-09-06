@@ -18,64 +18,45 @@ def run_dice() :
     basecmd = "../src/chips-cli" 
 
     house_pk = "03d97fcb5ea80289df537ee84714a9e04ae4dae2bf24e7bf1bebdcbb76ed919867"
-    house_priv = "cSctaA8JBCZYmSjDjD7pdbdesuERZUWb7Lsr9BLUPtSazALtyMAu"
+    # house_priv = "cSctaA8JBCZYmSjDjD7pdbdesuERZUWb7Lsr9BLUPtSazALtyMAu" -  must be in the wallet
     bettor_pk =  "0281a58d8925ae76e5df6cc374f7130b62e2df3ae3cee3f18edd9a0ca262902610" 
-    bettor_priv = "cSK2yZAnhZKnXWkaSk9rbKGtjwEA9yxLLu7zRQziZJHVKfFc3iE9"
+    # bettor_priv = "cSK2yZAnhZKnXWkaSk9rbKGtjwEA9yxLLu7zRQziZJHVKfFc3iE9" -  must be in the wallet
 
-    # bet ent 6d92705c876fc10034f1abba70ffac294df040d288ac82534675ec86b0fab62a
-    # bet hash 654424d73ffeda021e7f30332cdb5ce7b56934ba137a0200f75fe6cd569b23da
-    # house ent af9ed0f9aad3254ab7ea3ff20c4382556447c0d25008b978f023730190839166
-    # house hash fd77176c9fa9c8b07efbe246bbbb33f5f088a08b4ee8094645ded1c85db3afa8
-
+    # make entropies:
     house_ent = hex(random.randint(1, 0x7fffffff))[2:].zfill(64)
     bettor_ent = hex(random.randint(1, 0x7fffffff))[2:].zfill(64)    
     print("house_ent=", house_ent)
     print("bettor_ent=", bettor_ent)
+
+    # make entropy hashes:
     output = go([basecmd, "-testnet", "dicehentropy", house_ent])
     house_hash = output.decode("utf-8").strip()
     output = go([basecmd, "-testnet", "dicehentropy", bettor_ent])
     bettor_hash = output.decode("utf-8").strip()
     print("house_hash=", house_hash)
     print("bettor_hash=", bettor_hash)
-    # house_amount = "0.2"
+
+    # bettor amount and odds:
     bettor_amount = "0.2"
-    odds = "100:3"
+    odds = "50:50"
 
-    # fundparam = {}
-    # fundparam["changePosition"] = 0
-
-    print("creating bet proposal, amount:", bettor_amount, "odds:", odds)
+    print("creating bet proposal by bettor, amount:", bettor_amount, "odds:", odds, "...")
     output = go([basecmd, "-testnet", "dicecreatebettxproposal", bettor_pk, house_pk, bettor_amount, odds, bettor_hash])
     bettx = output.decode("utf-8").strip()
     assert(bettx.find("error") < 0)
     print("dicecreatebettxproposal created")
 
-    '''
-    output = go([basecmd, "-testnet", "fundrawtransaction", bettx, json.dumps(fundparam)])
-    outputdecoded = output.decode("utf-8").strip()
-    bettxfunded = json.loads(outputdecoded)
-    assert(bettxfunded['hex'])
-    print("fundrawtransaction funded for bettor")
-    '''
-
-    print("accepting bet proposal")
+    print("accepting bet proposal by house...")
     output = go([basecmd, "-testnet", "diceacceptbettxproposal", house_pk, bettx, house_hash])
     bettxaccepted = output.decode("utf-8").strip()
     assert(bettxaccepted.find("error") < 0)
-    print("diceacceptbettxproposal created")
+    print("diceacceptbettxproposal created and signed by house")
 
-    '''
-    output = go([basecmd, "-testnet", "fundrawtransaction", bettxaccepted, json.dumps(fundparam)])
-    outputdecoded = output.decode("utf-8").strip()
-    bettxacceptedfunded = json.loads(outputdecoded)
-    assert(bettxacceptedfunded["hex"])
-    print("fundrawtransaction funded for house")
-    '''
-
+    print("signing bet proposal by bettor...")
     output = go([basecmd, "-testnet", "signrawtransactionwithwallet", bettxaccepted])
     outputdecoded = output.decode("utf-8").strip()
     bettxsigned = json.loads(outputdecoded)
-    print("bettxsigned=", bettxsigned)
+    print("bettx signed with both bettor and house=", bettxsigned)
     assert(bettxsigned["complete"])
 
     output = go([basecmd, "-testnet", "sendrawtransaction", bettxsigned['hex']])
@@ -98,7 +79,7 @@ def run_dice() :
             elif txhouse_vout < 0 :
                 txhouse_vout = i
 
-    print("txbettor_vout=", txbettor_vout, "txhouse_vout=", txhouse_vout)
+    print("debug: found txbettor_vout=", txbettor_vout, "txhouse_vout=", txhouse_vout)
 
     try :
         print("")
@@ -106,16 +87,16 @@ def run_dice() :
         # try to claim as house
         output = go([basecmd, "-testnet", "diceclaim2", house_pk, house_ent, bettor_ent, bettxid + ":" + str(txhouse_vout), bettxid + ":" + str(txbettor_vout)])
         claimres = output.decode("utf-8").strip()
-        print("diceclaim as house result:", claimres)
+        print("diceclaim2 as house result:", claimres)
         if len(claimres) == 64 :   # returned non error but txid
             # go([basecmd, "-testnet", "generate", "1", "100000000"])  
             output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
-            print("claimed from house (-txfee):", txjson['vout'][0]['value'], "claimed from bettor:", txjson['vout'][1]['value'])
+            print("claimed from house (-txfee):", txjson['vout'][0]['value'], ", claimed from bettor:", txjson['vout'][1]['value'])
 
     except Exception as e :
-        print("diceclaim as house error:", e)
+        print("diceclaim2 as house error:", e)
 
     try :
         print("")
@@ -123,17 +104,18 @@ def run_dice() :
         # as bettor
         output = go([basecmd, "-testnet", "diceclaim2", bettor_pk, house_ent, bettor_ent, bettxid + ":" + str(txhouse_vout), bettxid + ":" + str(txbettor_vout)])
         claimres = output.decode("utf-8").strip()
-        print("diceclaim as bettor result:", claimres)
+        print("diceclaim2 as bettor result:", claimres)
         if len(claimres) == 64 :   # returned non error but txid
             # go([basecmd, "-testnet", "generate", "1", "100000000"])  
             output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
-            print("claimed from house (-txfee):", txjson['vout'][0]['value'], "claimed from bettor:", txjson['vout'][1]['value'])
+            print("claimed from house (-txfee):", txjson['vout'][0]['value'], ", claimed from bettor:", txjson['vout'][1]['value'])
 
     except Exception as e :
-        print("diceclaim as bettor error:", e)         
+        print("diceclaim2 as bettor error:", e)         
     
+    # generate a block with the txns
     go([basecmd, "-testnet", "generate", "1", "100000000"])  
 
 def main():
