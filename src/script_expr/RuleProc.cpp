@@ -184,7 +184,7 @@ void print_map(cparse::TokenMap m)
                 }
                 break;
             default:
-                std::cerr << " unknown type=" << e->second.token()->type;
+                std::cerr << " unknown type=" << std::hex << e->second.token()->type << std::dec;
         }
         std::cerr << std::endl;
     }
@@ -494,7 +494,7 @@ cparse::packToken print_to_stderr(cparse::TokenMap scope)
     cparse::packToken name = scope["name"];
     cparse::packToken val = scope["value"];
 
-    std::cerr << __func__ << " type=" << (int)val->type << " ";
+    std::cerr << __func__ << " type=" << std::hex << (int)val->type << std::dec << " ";
     if (name->type == cparse::STR)
         std::cerr << name.asString() << " ";
 
