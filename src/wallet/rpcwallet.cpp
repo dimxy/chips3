@@ -4336,6 +4336,12 @@ std::string txruleExprBettor =
     "  opretBet = DecodeOpReturn(_spentTx, \"{lockTime:V,win:I,loss:I,entropyHouseHash:H,housePK:B,entropyBettorHash:H,bettorPK:B}\") \n"  // bettx opreturn
     "  win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) - 1 \n"  // normalise and adjust wins for house advantage (2%)
     "  loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) + 1 \n"  // normalise and adjust loss for house advantage (2%)    // bettor wins - takes house's funds in loss/win ratio:
+    "  Print(\"opretBet.win=\", opretBet.win) \n"
+    "  Print(\"opretBet.loss=\", opretBet.loss) \n" 
+    "  Print(\"win100=\", win100) \n"
+    "  Print(\"loss100=\", loss100) \n"    
+    "  Print(\"Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100=\", Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100) \n"
+    "  Print(\"Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100=\", Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100) \n"
     "  AND { \n"
     //   house wins - takes bettor's funds in loss/win ratio:
     "    Sha256(opretClaim.entropyBettor) == opretBet.entropyBettorHash \n"  
@@ -4362,6 +4368,12 @@ const std::string txruleExprHouse =
     "  opretBet = DecodeOpReturn(_spentTx, \"{lockTime:V,win:I,loss:I,entropyHouseHash:H,housePK:B,entropyBettorHash:H,bettorPK:B}\") \n"  // bettx opreturn
     "  win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) - 1 \n"  // normalise and adjust wins for house advantage (2%)
     "  loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) + 1 \n"  // normalise and adjust loss for house advantage (2%)    // bettor wins - takes house's funds in loss/win ratio:
+    "  Print(\"opretBet.win=\", opretBet.win) \n"
+    "  Print(\"opretBet.loss=\", opretBet.loss) \n" 
+    "  Print(\"win100=\", win100) \n"
+    "  Print(\"loss100=\", loss100) \n"
+    "  Print(\"Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100=\", Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100) \n"
+    "  Print(\"Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100=\", Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100) \n"
     "  AND { \n"
     //   bettor wins - takes house's funds in loss/win ratio:
     "    Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"  
@@ -4534,6 +4546,8 @@ UniValue diceacceptbettxproposal(const JSONRPCRequest& request)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX opreturn decode failed");
     if (win <= 0 || loss <= 0)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX invalid win or loss");
+    if ((double)win/(double)loss < 0.03)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX win:loss ratio too low");
     if (!bettorpk.IsValid())
         throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX invalid bettor pk");
 
@@ -4674,12 +4688,17 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
 
     result.pushKV("BettorPubKey", HexStr(bettorpk));
     result.pushKV("BettorAmountOutput", mtx.vout[betvout].nValue);
+    std::cerr << __func__ << " housevout=" << housevout << " betvout=" << betvout << std::endl;
     if (housevout >= 0)  {
         result.pushKV("HousePubKey", HexStr(housepk));
         result.pushKV("HouseAmountOnOutput", mtx.vout[housevout].nValue);
         std::ostringstream s;
-        s << mtx.vout[housevout].nValue * (win+loss) / (mtx.vout[betvout].nValue + mtx.vout[housevout].nValue) << ":" << mtx.vout[betvout].nValue * (win+loss) / (mtx.vout[betvout].nValue + mtx.vout[housevout].nValue);
-        result.pushKV("HouseAmount:BettorAmount", s.str());
+        if ((mtx.vout[betvout].nValue + mtx.vout[housevout].nValue) != 0)  {
+            s << round(mtx.vout[betvout].nValue * (double)(win+loss) / (mtx.vout[betvout].nValue + mtx.vout[housevout].nValue))
+            << ":" 
+            << round(mtx.vout[housevout].nValue * (double)(win+loss) / (mtx.vout[betvout].nValue + mtx.vout[housevout].nValue));
+        }
+        result.pushKV("BettorAmount:HouseAmount", s.str());
     }
 
     {
