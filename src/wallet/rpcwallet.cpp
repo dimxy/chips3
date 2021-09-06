@@ -4139,6 +4139,8 @@ UniValue getaddressinfo(const JSONRPCRequest& request)
     return ret;
 }
 
+// old version of dice rpc:
+// create dice funding by a house
 UniValue dicefund(const JSONRPCRequest& request)
 {
     CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
@@ -4148,6 +4150,7 @@ UniValue dicefund(const JSONRPCRequest& request)
     if (request.fHelp || request.params.size() != 4)
         throw std::runtime_error(
             "dicefund mypk bettorpk hentropy amount\n"
+            "note: this is old version, use dicecreatebettxproposal/diceacceptbettxproposal \n"
         );
 
     ObserveSafeMode();
@@ -4225,6 +4228,8 @@ UniValue dicefund(const JSONRPCRequest& request)
     return tx->GetHash().GetHex();
 }
 
+// old version of dice rpc:
+// create bet by a bettor
 UniValue dicebet(const JSONRPCRequest& request)
 {
     CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
@@ -4234,6 +4239,7 @@ UniValue dicebet(const JSONRPCRequest& request)
     if (request.fHelp || request.params.size() != 5)
         throw std::runtime_error(
             "dicebet mypk housepk hentropy amount win:loss\n"
+            "note: this is old version, use dicecreatebettxproposal/diceacceptbettxproposal \n"
         );
 
     ObserveSafeMode();
@@ -4300,7 +4306,7 @@ UniValue dicebet(const JSONRPCRequest& request)
     "    bettorFunds = bettx.vout[_evalTx.vin[1].n].nValue \n"  // original bettor funds
     "    bettorBack = OutputsForScriptPubKey(_evalTx, bettx.vout[_evalTx.vin[1].n].scriptPubKey) \n"  // returned back bettor funds
     "    Sha256(opretClaim.entropyBet) == \"" + hentropyHex + "\"\n"
-    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * win100 < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * loss100 \n"
+    "    Norm256(Sha256(opretClaim.entropyBet+opretClaim.entropyHouse), 100) * win100 < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBet), 100) * loss100 \n" // house wins
     "    Print(\"(bettorFunds - bettorBack) * opretBet.loss=\", int((bettorFunds - bettorBack) * opretBet.loss)) \n"
     "    Print(\"(bettorFunds * opretBet.win=\", int(bettorFunds * opretBet.win)) \n"
     "    int((bettorFunds - bettorBack) * opretBet.loss) <= int(bettorFunds * opretBet.win) \n"  // house's/bettor's <= win/loss
@@ -4313,14 +4319,8 @@ UniValue dicebet(const JSONRPCRequest& request)
     "  } \n"
     "} ";
 
-
-
     CScript opreturn;
     opreturn << OP_RETURN << E_MARSHAL(ss << oddsWin << oddsLoss);
-    
-    
-    //run_test_decode_opreturn2(opreturn, "{funcid:C,myamount:V,myarr:A{myamount:N}}");
-    //return "";
 
     EnsureWalletIsUnlocked(pwallet);
     CTransactionRef tx = SendMoney(pwallet, CNoDestination(), { mypk, housepk }, nAmount, fSubtractFeeFromAmount, coin_control, std::move(mapValue), {} /* fromAccount */, ruleExpr, uint256(), 0, opreturn);
@@ -4332,67 +4332,76 @@ UniValue dicebet(const JSONRPCRequest& request)
 // spk txrule script to spend bettor funds:
 std::string txruleExprBettor = 
     "OR {    \n"
-    "  opretClaim = DecodeOpReturn(_evalTx, \"{entropyHouse:H,entropyBettor:H}\") \n"
-    "  opretBet = DecodeOpReturn(_spentTx, \"{lockTime:V,win:I,loss:I,entropyHouseHash:H,housePK:B,entropyBettorHash:H,bettorPK:B}\") \n"  // bettx opreturn
-    "  win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) - 1 \n"  // normalise and adjust wins for house advantage (2%)
-    "  loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) + 1 \n"  // normalise and adjust loss for house advantage (2%)    // bettor wins - takes house's funds in loss/win ratio:
-    "  Print(\"opretBet.win=\", opretBet.win) \n"
-    "  Print(\"opretBet.loss=\", opretBet.loss) \n" 
-    "  Print(\"win100=\", win100) \n"
-    "  Print(\"loss100=\", loss100) \n"    
-    "  Print(\"Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100=\", Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100) \n"
-    "  Print(\"Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100=\", Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100) \n"
+    "   opretClaim = DecodeOpReturn(_evalTx, \"{entropyHouse:H,entropyBettor:H}\") \n"
+    "   opretBet = DecodeOpReturn(_spentTx, \"{lockTime:V,win:I,loss:I,entropyHouseHash:H,housePK:B,entropyBettorHash:H,bettorPK:B}\") \n"  // bettx opreturn
+    "   win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) \n"  // normalise 
+    "   loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) \n"  // normalise 
+//    "  Print(\"opretBet.win=\", opretBet.win) \n"
+//    "  Print(\"opretBet.loss=\", opretBet.loss) \n" 
+//    "  Print(\"win100=\", win100) \n"
+//    "  Print(\"loss100=\", loss100) \n"    
+//    "  Print(\"Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100=\", Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100) \n"
+//    "  Print(\"Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100=\", Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100) \n"
     "  AND { \n"
-    //   house wins - takes bettor's funds in loss/win ratio:
-    "    Sha256(opretClaim.entropyBettor) == opretBet.entropyBettorHash \n"  
-    "    Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100 < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100 \n"
-    "    IsSigner(_evalTx, _nIn, opretBet.housePK) \n" // signed by house
+    //  house wins - takes bettor's funds in loss/win ratio:
+    "   Sha256(opretClaim.entropyBettor) == opretBet.entropyBettorHash \n"  // revealed entropy is correct  
+    // check win event, adjust for house by 2% (win-1, loss+1):
+    "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n"
+    "   bettorAmount = _spentTx.vout[_nPrevOut].nValue \n"
+    "   houseAmount = _spentTx.vout[_nPrevOut+1].nValue \n"  
+    "   bettorAmount >= houseAmount / loss100 * win100 \n" // ensure bettor provided sufficient funds for the bet
+    "   IsSigner(_evalTx, _nIn, opretBet.housePK) \n" // signed by house
     "  } \n" 
     "  AND { \n"
-    //   bettor wins - takes all his funds back:
-    "    Sha256(opretClaim.entropyBettor) == opretBet.entropyBettorHash \n"
-    "    Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100 > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100 \n"
-    "    IsSigner(_evalTx, _nIn, opretBet.bettorPK) \n"  // signed by bettor
-    "  } \n" 
+    //  bettor wins - takes all his funds back:
+    "   Sha256(opretClaim.entropyBettor) == opretBet.entropyBettorHash \n"  // revealed bettor hash is correct
+        // check win event, adjust for house by 2% (win-1, loss+1):
+    "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n" // bettor wins
+    "   IsSigner(_evalTx, _nIn, opretBet.bettorPK) \n"  // signed by bettor
+    " } \n" 
     "  AND { \n"
-    //   bettor takes back his funds after timeout:
-    "    _evalTx.lockTime >= lockTime \n"
-    "    IsSigner(_evalTx, _nIn, opretBet.bettorPK) \n" // signed by bettor
-    "  } \n"
+    //  bettor takes back his funds after timeout:
+    "   _evalTx.lockTime >= opretBet.lockTime \n"
+    "   IsSigner(_evalTx, _nIn, opretBet.bettorPK) \n" // signed by bettor
+    " } \n"
     "} ";
 
 // spk txrule script to spend house funds:
 const std::string txruleExprHouse = 
     "OR {    \n"
-    "  opretClaim = DecodeOpReturn(_evalTx, \"{entropyHouse:H,entropyBettor:H}\") \n"
-    "  opretBet = DecodeOpReturn(_spentTx, \"{lockTime:V,win:I,loss:I,entropyHouseHash:H,housePK:B,entropyBettorHash:H,bettorPK:B}\") \n"  // bettx opreturn
-    "  win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) - 1 \n"  // normalise and adjust wins for house advantage (2%)
-    "  loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) + 1 \n"  // normalise and adjust loss for house advantage (2%)    // bettor wins - takes house's funds in loss/win ratio:
-    "  Print(\"opretBet.win=\", opretBet.win) \n"
-    "  Print(\"opretBet.loss=\", opretBet.loss) \n" 
-    "  Print(\"win100=\", win100) \n"
-    "  Print(\"loss100=\", loss100) \n"
-    "  Print(\"Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100=\", Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100) \n"
-    "  Print(\"Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100=\", Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100) \n"
+    "   opretClaim = DecodeOpReturn(_evalTx, \"{entropyHouse:H,entropyBettor:H}\") \n"
+    "   opretBet = DecodeOpReturn(_spentTx, \"{lockTime:V,win:I,loss:I,entropyHouseHash:H,housePK:B,entropyBettorHash:H,bettorPK:B}\") \n"  // bettx opreturn
+    "   win100 = opretBet.win * 100 / (opretBet.loss + opretBet.win) \n"  // normalise 
+    "   loss100 = opretBet.loss * 100 / (opretBet.loss + opretBet.win) \n"  // normalise
+//    "  Print(\"opretBet.win=\", opretBet.win) \n"
+//    "  Print(\"opretBet.loss=\", opretBet.loss) \n" 
+//    "  Print(\"win100=\", win100) \n"
+//    "  Print(\"loss100=\", loss100) \n"
+//    "  Print(\"Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100=\", Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100) \n"
+//    "  Print(\"Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100=\", Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100) \n"
     "  AND { \n"
-    //   bettor wins - takes house's funds in loss/win ratio:
-    "    Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"  
-    "    Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100 > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100 \n"
-    "    IsSigner(_evalTx, _nIn, opretBet.bettorPK) \n" // signed by bettor
+    //  bettor wins - takes house's funds in loss/win ratio:
+    "   Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"  
+        // check 'house wins' event, adjusted for house by 2% (win-1, loss+1):
+    "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n"
+    "   houseAmount = _spentTx.vout[_nPrevOut].nValue \n"
+    "   bettorAmount = _spentTx.vout[_nPrevOut-1].nValue \n"  
+    "   houseAmount >= bettorAmount / win100 * loss100 \n" // ensure house provided sufficient funds for the bet
+    "   IsSigner(_evalTx, _nIn, opretBet.bettorPK) \n" // signed by bettor
     "  } \n" 
     "  AND { \n"
-    //   house wins - takes all his funds back:
-    "    Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"
-    "    Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * win100 < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100 \n"
-    "    IsSigner(_evalTx, _nIn, opretBet.housePK) \n"  // signed by house
-    "  } \n" 
+    //  house wins - takes all his funds back:
+    "   Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"
+    // check win event adjusted for house by 2% (win-1, loss+1):
+    "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n"
+    "   IsSigner(_evalTx, _nIn, opretBet.housePK) \n"  // signed by house
+    " } \n" 
     "  AND { \n"
-    //   house takes back his funds after timeout:
-    "    _evalTx.lockTime >= lockTime \n"
-    "    IsSigner(_evalTx, _nIn, opretBet.housePK) \n" // signed by house
-    "  } \n"
+    //  house takes back his funds after timeout:
+    "   _evalTx.lockTime >= opretBet.lockTime \n"
+    "   IsSigner(_evalTx, _nIn, opretBet.housePK) \n" // signed by house
+    " } \n"
     "} ";
-
 
 // create bet tx proposal by the bettor
 UniValue dicecreatebettxproposal(const JSONRPCRequest& request)
@@ -4461,7 +4470,7 @@ UniValue dicecreatebettxproposal(const JSONRPCRequest& request)
     txNew.vout.push_back(CTxOut(nAmount, ruleSPK)); 
 
     CCoinControl coinControl;
-    int changePosition = -1;
+    int changePosition = 1; // we rely in txrule that the bettor fund is vout0
     bool lockUnspents = false;
     UniValue subtractFeeFromOutputs;
     std::set<int> setSubtractFeeFromOutputs;
@@ -4562,12 +4571,13 @@ UniValue diceacceptbettxproposal(const JSONRPCRequest& request)
     }
     CScript ruleSPK = GetScriptForMofNAndRule(1, { mypk, bettorpk }, txruleExprHouse);
 
-    CAmount nAmount = mtx.vout[betvout].nValue  * loss / win;
-    mtx.vout.push_back(CTxOut(nAmount, ruleSPK)); 
-    std::cerr << __func__ << " house amount=" << nAmount << std::endl; 
+    CAmount nBettorAmount = mtx.vout[betvout].nValue;
+    CAmount nHouseAmount = nBettorAmount * loss / win;
+    mtx.vout.insert(mtx.vout.begin()+1, CTxOut(nHouseAmount, ruleSPK)); // we rely that house funds is in vout1
+    std::cerr << __func__ << " house amount=" << nHouseAmount << std::endl; 
 
     CCoinControl coinControl;
-    int changePosition = -1;
+    int changePosition = 2;// -1;
     bool lockUnspents = false;
     UniValue subtractFeeFromOutputs;
     std::set<int> setSubtractFeeFromOutputs;
@@ -4588,6 +4598,7 @@ UniValue diceacceptbettxproposal(const JSONRPCRequest& request)
 UniValue dicedecodebettx(const JSONRPCRequest& request)
 {
     UniValue result(UniValue::VOBJ);
+    UniValue errors(UniValue::VARR);
 
     CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
     if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
@@ -4678,9 +4689,9 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
 
     result.pushKV("LockTime", nLockTime);
     result.pushKV("LockDateTime(UTC)", FormatISO8601DateTime(nLockTime));
-    std::ostringstream s;
-    s << win << ":" << loss;
-    result.pushKV("win:loss", s.str());
+    std::ostringstream sodds;
+    sodds << win << ":" << loss;
+    result.pushKV("win:loss", sodds.str());
     result.pushKV("HasHouseOutput", housevout >= 0 ? "yes" : "no");
     result.pushKV("MyInputs", myInputs);
     result.pushKV("MyOutputs", myOutputs);
@@ -4692,23 +4703,26 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
     if (housevout >= 0)  {
         result.pushKV("HousePubKey", HexStr(housepk));
         result.pushKV("HouseAmountOnOutput", mtx.vout[housevout].nValue);
-        std::ostringstream s;
+        std::ostringstream sratio;
         if ((mtx.vout[betvout].nValue + mtx.vout[housevout].nValue) != 0)  {
-            s << round(mtx.vout[betvout].nValue * (double)(win+loss) / (mtx.vout[betvout].nValue + mtx.vout[housevout].nValue))
+            sratio << round(mtx.vout[betvout].nValue * (double)(win+loss) / (mtx.vout[betvout].nValue + mtx.vout[housevout].nValue))
             << ":" 
             << round(mtx.vout[housevout].nValue * (double)(win+loss) / (mtx.vout[betvout].nValue + mtx.vout[housevout].nValue));
         }
-        result.pushKV("BettorAmount:HouseAmount", s.str());
+        result.pushKV("BettorAmount:HouseAmount", sratio.str());
+        if (sratio.str() != sodds.str())
+            errors.push_back("amounts ratio is not equal to win:loss param");
     }
 
+    uint256 hashBettorScript, hashBettorOutput;
     {
         CSHA256 sha;
-        vuint8_t hash32;
-        hash32.resize(CSHA256::OUTPUT_SIZE);
+        vuint8_t vhash32;
+        vhash32.resize(CSHA256::OUTPUT_SIZE);
         sha.Write(reinterpret_cast<const unsigned char*>(txruleExprBettor.c_str()), txruleExprBettor.size());
-        sha.Finalize(hash32.data());
-        uint256 hash(hash32);
-        result.pushKV("OriginalBettorScriptHash", hash.GetHex());
+        sha.Finalize(vhash32.data());
+        hashBettorScript = uint256(vhash32);
+        result.pushKV("OriginalBettorScriptHash", hashBettorScript.GetHex());
     }
     {
         txnouttype whichType;
@@ -4718,13 +4732,15 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
         if (Solver(mtx.vout[betvout].scriptPubKey, whichType, vSolutions, &vTxRuleScripts) && vTxRuleScripts.size() == 1)
         {
             CSHA256 sha;
-            vuint8_t hash32;
-            hash32.resize(CSHA256::OUTPUT_SIZE);
+            vuint8_t vhash32;
+            vhash32.resize(CSHA256::OUTPUT_SIZE);
             sha.Write(vTxRuleScripts[0].data(), vTxRuleScripts[0].size());
-            sha.Finalize(hash32.data());
-            uint256 hash(hash32);
+            sha.Finalize(vhash32.data());
+            hashBettorOutput = uint256(vhash32);
 
-            result.pushKV("OutputBettorScriptHash", hash.GetHex());
+            result.pushKV("OutputBettorScriptHash", hashBettorOutput.GetHex());
+            if (hashBettorScript != hashBettorOutput)
+                errors.push_back("bettor script hash incorrect");
         }
         else
         {
@@ -4732,15 +4748,16 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
         }
     }
 
+    uint256 hashHouseScript, hashHouseOutput;
     if (housevout >= 0)
     {
         CSHA256 sha;
-        vuint8_t hash32;
-        hash32.resize(CSHA256::OUTPUT_SIZE);
+        vuint8_t vhash32;
+        vhash32.resize(CSHA256::OUTPUT_SIZE);
         sha.Write(reinterpret_cast<const unsigned char*>(txruleExprHouse.c_str()), txruleExprHouse.size());
-        sha.Finalize(hash32.data());
-        uint256 hash(hash32);
-        result.pushKV("OriginalHouseScriptHash", hash.GetHex());
+        sha.Finalize(vhash32.data());
+        hashHouseScript = uint256(vhash32);
+        result.pushKV("OriginalHouseScriptHash", hashHouseScript.GetHex());
     }
 
     if (housevout >= 0)
@@ -4752,19 +4769,23 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
         if (Solver(mtx.vout[housevout].scriptPubKey, whichType, vSolutions, &vTxRuleScripts) && vTxRuleScripts.size() == 1)
         {
             CSHA256 sha;
-            vuint8_t hash32;
-            hash32.resize(CSHA256::OUTPUT_SIZE);
+            vuint8_t vhash32;
+            vhash32.resize(CSHA256::OUTPUT_SIZE);
             sha.Write(vTxRuleScripts[0].data(), vTxRuleScripts[0].size());
-            sha.Finalize(hash32.data());
-            uint256 hash(hash32);
+            sha.Finalize(vhash32.data());
+            hashHouseOutput = uint256(vhash32);
 
-            result.pushKV("OutputHouseScriptHash", hash.GetHex());
+            result.pushKV("OutputHouseScriptHash", hashHouseOutput.GetHex());
+            if (hashHouseOutput != hashHouseScript)
+                errors.push_back("house script hash incorrect");
         }
         else
         {
             result.pushKV("OutputHouseScriptHash", "invalid-script-count");
         }
     }
+    if (!errors.empty())
+        result.pushKV("errors", errors);
 
     return result;
 }
