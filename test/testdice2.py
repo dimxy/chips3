@@ -39,10 +39,10 @@ def run_dice() :
     print("bettor_hash=", bettor_hash)
     # house_amount = "0.2"
     bettor_amount = "0.2"
-    odds = "100:1"
+    odds = "100:3"
 
-    fundparam = {}
-    fundparam["changePosition"] = 0
+    # fundparam = {}
+    # fundparam["changePosition"] = 0
 
     print("creating bet proposal, amount:", bettor_amount, "odds:", odds)
     output = go([basecmd, "-testnet", "dicecreatebettxproposal", bettor_pk, house_pk, bettor_amount, odds, bettor_hash])
@@ -82,7 +82,7 @@ def run_dice() :
     bettxid = output.decode("utf-8").strip()
     assert(bettxid.find("error") < 0) # no error found
 
-    go([basecmd, "-testnet", "generate", "1", "100000000"])  
+    # go([basecmd, "-testnet", "generate", "1", "100000000"])  
 
     # find vout with funds
     output = go([basecmd, "-testnet", "getrawtransaction", bettxid, "true"])
@@ -108,7 +108,7 @@ def run_dice() :
         claimres = output.decode("utf-8").strip()
         print("diceclaim as house result:", claimres)
         if len(claimres) == 64 :   # returned non error but txid
-            go([basecmd, "-testnet", "generate", "1", "100000000"])  
+            # go([basecmd, "-testnet", "generate", "1", "100000000"])  
             output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
@@ -125,7 +125,7 @@ def run_dice() :
         claimres = output.decode("utf-8").strip()
         print("diceclaim as bettor result:", claimres)
         if len(claimres) == 64 :   # returned non error but txid
-            go([basecmd, "-testnet", "generate", "1", "100000000"])  
+            # go([basecmd, "-testnet", "generate", "1", "100000000"])  
             output = go([basecmd, "-testnet", "getrawtransaction", claimres, "true"])
             strjson = output.decode("utf-8").strip()
             txjson = json.loads(strjson)
@@ -133,6 +133,8 @@ def run_dice() :
 
     except Exception as e :
         print("diceclaim as bettor error:", e)         
+    
+    go([basecmd, "-testnet", "generate", "1", "100000000"])  
 
 def main():
     run_dice()
