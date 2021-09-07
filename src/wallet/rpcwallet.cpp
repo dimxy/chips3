@@ -4345,7 +4345,7 @@ std::string txruleExprBettor =
     "  AND { \n"
     //  house wins - takes bettor's funds in loss/win ratio:
     "   Sha256(opretClaim.entropyBettor) == opretBet.entropyBettorHash \n"  // revealed entropy is correct  
-    // check win event, adjust for house by 2% (win-1, loss+1):
+    // check win event, adjusted for house by 2% (win-1, loss+1):
     "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n"
     "   bettorAmount = _spentTx.vout[_nPrevOut].nValue \n"
     "   houseAmount = _spentTx.vout[_nPrevOut+1].nValue \n"  
@@ -4355,7 +4355,7 @@ std::string txruleExprBettor =
     "  AND { \n"
     //  bettor wins - takes all his funds back:
     "   Sha256(opretClaim.entropyBettor) == opretBet.entropyBettorHash \n"  // revealed bettor hash is correct
-        // check win event, adjust for house by 2% (win-1, loss+1):
+        // check win event, adjusted for house by 2% (win-1, loss+1):
     "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n" // bettor wins
     "   IsSigner(_evalTx, _nIn, opretBet.bettorPK) \n"  // signed by bettor
     " } \n" 
@@ -4381,7 +4381,7 @@ const std::string txruleExprHouse =
 //    "  Print(\"Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100=\", Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * loss100) \n"
     "  AND { \n"
     //  bettor wins - takes house's funds in loss/win ratio:
-    "   Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"  
+    "   Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"  // check revealed entropy matches the entropy hash
         // check 'house wins' event, adjusted for house by 2% (win-1, loss+1):
     "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) > Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n"
     "   houseAmount = _spentTx.vout[_nPrevOut].nValue \n"
@@ -4391,8 +4391,8 @@ const std::string txruleExprHouse =
     "  } \n" 
     "  AND { \n"
     //  house wins - takes all his funds back:
-    "   Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n"
-    // check win event adjusted for house by 2% (win-1, loss+1):
+    "   Sha256(opretClaim.entropyHouse) == opretBet.entropyHouseHash \n" // check revealed entropy matches the entropy hash
+        // check win event, adjusted for house by 2% (win-1, loss+1):
     "   Norm256(Sha256(opretClaim.entropyBettor+opretClaim.entropyHouse), 100) * (win100-1) < Norm256(Sha256(opretClaim.entropyHouse+opretClaim.entropyBettor), 100) * (loss100+1) \n"
     "   IsSigner(_evalTx, _nIn, opretBet.housePK) \n"  // signed by house
     " } \n" 
@@ -4487,114 +4487,7 @@ UniValue dicecreatebettxproposal(const JSONRPCRequest& request)
     return HexStr(E_MARSHAL(ss << txNew));
 }
 
-// rpc impl to accept bet tx proposal by the house
-UniValue diceacceptbettxproposal(const JSONRPCRequest& request)
-{
-    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
-    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
-        return NullUniValue;
-    }
-    if (request.fHelp || request.params.size() != 3)
-        throw std::runtime_error(
-            "diceacceptbettxproposal mypk txhex my-entropy-hash\n"
-        );
-
-    ObserveSafeMode();
-
-    // Make sure the results are valid at least up to the most recent block
-    // the user could have gotten from another RPC command prior to now
-    pwallet->BlockUntilSyncedToCurrentChain();
-    EnsureWalletIsUnlocked(pwallet);
-
-    LOCK2(cs_main, pwallet->cs_wallet);
-
-    std::string mypkHex = request.params[0].get_str();
-    CPubKey mypk(ParseHex(mypkHex));
-    if (!mypk.IsFullyValid())
-        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid my pk");
-
-    CMutableTransaction mtx;
-    if (!DecodeHexTx(mtx, request.params[1].get_str(), true)) {
-        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "BETTX decode failed");
-    }
-
-    int32_t betvout = -1;
-    for (size_t i = 0; i < mtx.vout.size(); i ++)
-    {
-        txnouttype type;
-        std::vector<CTxDestination> addresses;
-        int nRequired;
-
-        if (ExtractDestinations(mtx.vout[i].scriptPubKey, type, addresses, nRequired)) {
-            if (type == TX_MULTISIG_WITH_TXRULE)   {
-                if (betvout >= 0)
-                    throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX has more than one bet output");
-                betvout = i;
-            }
-        }
-    }
-    if (betvout < 0)
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX does not have bet output");
-
-    std::string myentropyhashHex = request.params[2].get_str();
-    uint256 myEntropyHash = ParseHashStr(myentropyhashHex, "my-entropy-hash");
-    if (myEntropyHash.IsNull())
-        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid my entropy hash");
-
-    int32_t win, loss;
-    uint256 bettorEntropyHash;
-    vuint8_t vopret;
-    CPubKey bettorpk;
-    int64_t nLockTime;
-
-    if (!GetOpReturnData(mtx.vout.back().scriptPubKey, vopret))
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX no opreturn output");
-    mtx.vout.pop_back(); // remove opreturn output to recreate it
-
-    if (!E_UNMARSHAL(vopret, ss >> nLockTime >> win >> loss >> bettorEntropyHash >> bettorpk))
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX opreturn decode failed");
-    if (win <= 0 || loss <= 0)
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX invalid win or loss");
-    if ((double)win/(double)loss < 0.03)
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX win:loss ratio too low");
-    if (!bettorpk.IsValid())
-        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX invalid bettor pk");
-
-    // Wallet comments
-    mapValue_t mapValue;
-
-    CRuleProc ruleproc;
-    std::string error;
-    ruleproc.init();
-    if (ruleproc.compile(txruleExprHouse, error) != RULE_OKAY)  {
-        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Could not parse txrule expression: ") + error);
-    }
-    CScript ruleSPK = GetScriptForMofNAndRule(1, { mypk, bettorpk }, txruleExprHouse);
-
-    CAmount nBettorAmount = mtx.vout[betvout].nValue;
-    CAmount nHouseAmount = nBettorAmount * loss / win;
-    mtx.vout.insert(mtx.vout.begin()+1, CTxOut(nHouseAmount, ruleSPK)); // we rely that house funds is in vout1
-    std::cerr << __func__ << " house amount=" << nHouseAmount << std::endl; 
-
-    CCoinControl coinControl;
-    int changePosition = 2;// -1;
-    bool lockUnspents = false;
-    UniValue subtractFeeFromOutputs;
-    std::set<int> setSubtractFeeFromOutputs;
-    CAmount nFeeOut;
-    std::string strFailReason;
-
-    if (!pwallet->FundTransaction(mtx, nFeeOut, changePosition, strFailReason, lockUnspents, setSubtractFeeFromOutputs, coinControl)) {
-        throw JSONRPCError(RPC_WALLET_ERROR, strFailReason);
-    }
-
-    CScript opreturn;
-    opreturn << OP_RETURN << E_MARSHAL(ss << nLockTime << win << loss << myEntropyHash << mypk << bettorEntropyHash << bettorpk);  
-    mtx.vout.push_back(CTxOut(0, opreturn)); 
-    
-    return HexStr(E_MARSHAL(ss << mtx));
-}
-
+// decode bettx and print its content and errors id any
 UniValue dicedecodebettx(const JSONRPCRequest& request)
 {
     UniValue result(UniValue::VOBJ);
@@ -4623,7 +4516,6 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
 
     int32_t betvout = -1;
     int32_t housevout = -1;
-
     for (size_t i = 0; i < mtx.vout.size(); i ++)
     {
         txnouttype type;
@@ -4643,6 +4535,11 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
     }
     if (betvout < 0)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX does not have bettor output");
+    if (betvout != 0)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX bettor output position must be 0");
+    if (housevout >= 0 && housevout != 1)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX house output position must be 1");
+
     if (mtx.vout[betvout].nValue == 0)
         throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX bettor amount is null");
 
@@ -4788,6 +4685,129 @@ UniValue dicedecodebettx(const JSONRPCRequest& request)
         result.pushKV("errors", errors);
 
     return result;
+}
+
+// rpc impl to accept bet tx proposal by the house
+UniValue diceacceptbettxproposal(const JSONRPCRequest& request)
+{
+    CWallet * const pwallet = GetWalletForJSONRPCRequest(request);
+    if (!EnsureWalletIsAvailable(pwallet, request.fHelp)) {
+        return NullUniValue;
+    }
+    if (request.fHelp || request.params.size() != 3)
+        throw std::runtime_error(
+            "diceacceptbettxproposal mypk txhex my-entropy-hash\n"
+        );
+
+    std::string mypkHex = request.params[0].get_str();
+    CPubKey mypk(ParseHex(mypkHex));
+    if (!mypk.IsFullyValid())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid my pk");
+
+    try {
+        JSONRPCRequest decodeRequest;
+        decodeRequest.params.setArray();
+        decodeRequest.params.push_back(request.params[1]);
+        UniValue decodeResult = dicedecodebettx(decodeRequest);
+        if (decodeResult.exists("errors"))
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "dicedecodebettx returned errors for BETTX");
+        if (decodeResult["HasHouseOutput"].get_str() != "no" )
+            throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX already has house output");
+    }
+    catch (const std::exception& e) {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("dicedecodebettx returned error for BETTX: ") + e.what());
+    }
+
+    ObserveSafeMode();
+    // Make sure the results are valid at least up to the most recent block
+    // the user could have gotten from another RPC command prior to now
+    pwallet->BlockUntilSyncedToCurrentChain();
+    EnsureWalletIsUnlocked(pwallet);
+
+    LOCK2(cs_main, pwallet->cs_wallet);
+
+    CMutableTransaction mtx;
+    if (!DecodeHexTx(mtx, request.params[1].get_str(), true)) {
+        throw JSONRPCError(RPC_DESERIALIZATION_ERROR, "BETTX decode failed");
+    }
+
+    int32_t betvout = -1;
+    for (size_t i = 0; i < mtx.vout.size(); i ++)
+    {
+        txnouttype type;
+        std::vector<CTxDestination> addresses;
+        int nRequired;
+
+        if (ExtractDestinations(mtx.vout[i].scriptPubKey, type, addresses, nRequired)) {
+            if (type == TX_MULTISIG_WITH_TXRULE)   {
+                if (betvout >= 0)
+                    throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX has more than one bet output");
+                betvout = i;
+            }
+        }
+    }
+    if (betvout < 0)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX does not have bet output");
+    if (betvout != 0)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX bettor output position must be 0");
+
+    std::string myentropyhashHex = request.params[2].get_str();
+    uint256 myEntropyHash = ParseHashStr(myentropyhashHex, "my-entropy-hash");
+    if (myEntropyHash.IsNull())
+        throw JSONRPCError(RPC_TYPE_ERROR, "Invalid my entropy hash");
+
+    int32_t win, loss;
+    uint256 bettorEntropyHash;
+    vuint8_t vopret;
+    CPubKey bettorpk;
+    int64_t nLockTime;
+
+    if (!GetOpReturnData(mtx.vout.back().scriptPubKey, vopret))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX no opreturn output");
+    mtx.vout.pop_back(); // remove opreturn output to recreate it
+
+    if (!E_UNMARSHAL(vopret, ss >> nLockTime >> win >> loss >> bettorEntropyHash >> bettorpk))
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX opreturn decode failed");
+    if (win <= 0 || loss <= 0)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX invalid win or loss");
+    if ((double)win/(double)loss < 0.03)
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX win:loss ratio too low");
+    if (!bettorpk.IsValid())
+        throw JSONRPCError(RPC_INVALID_PARAMETER, "BETTX invalid bettor pk");
+
+    // Wallet comments
+    mapValue_t mapValue;
+
+    CRuleProc ruleproc;
+    std::string error;
+    ruleproc.init();
+    if (ruleproc.compile(txruleExprHouse, error) != RULE_OKAY)  {
+        throw JSONRPCError(RPC_INVALID_PARAMETER, std::string("Could not parse txrule expression: ") + error);
+    }
+    CScript ruleSPK = GetScriptForMofNAndRule(1, { mypk, bettorpk }, txruleExprHouse);
+
+    CAmount nBettorAmount = mtx.vout[betvout].nValue;
+    CAmount nHouseAmount = nBettorAmount * loss / win;
+    mtx.vout.insert(mtx.vout.begin()+1, CTxOut(nHouseAmount, ruleSPK)); // we rely that house funds is in vout1
+    std::cerr << __func__ << " house amount=" << nHouseAmount << std::endl; 
+
+    CCoinControl coinControl;
+    int changePosition = 2;// -1;
+    bool lockUnspents = false;
+    UniValue subtractFeeFromOutputs;
+    std::set<int> setSubtractFeeFromOutputs;
+    CAmount nFeeOut;
+    std::string strFailReason;
+
+    if (!pwallet->FundTransaction(mtx, nFeeOut, changePosition, strFailReason, lockUnspents, setSubtractFeeFromOutputs, coinControl)) {
+        throw JSONRPCError(RPC_WALLET_ERROR, strFailReason);
+    }
+
+    CScript opreturn;
+    opreturn << OP_RETURN << E_MARSHAL(ss << nLockTime << win << loss << myEntropyHash << mypk << bettorEntropyHash << bettorpk);  
+    mtx.vout.push_back(CTxOut(0, opreturn)); 
+    
+    return HexStr(E_MARSHAL(ss << mtx));
 }
 
 bool pubkey2addr(char *destaddr,uint8_t *pubkey33);
